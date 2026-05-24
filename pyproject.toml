@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cfu-counter"
+version = "0.1.0"
+description = "Hybrid OpenCV + SAM CFU counter for culturomics plate photos with a local web GUI"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "WeF culturomics team" }]
+license = { text = "MIT" }
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "opencv-python-headless",
+    "pillow",
+    "pandas",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+]
+
+[project.optional-dependencies]
+sam = ["segment-anything", "torch"]
+dev = ["pytest"]
+
+[project.scripts]
+cfu-counter = "cfu_counter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cfu_counter*"]
+
+[tool.setuptools.package-data]
+"cfu_counter.server" = ["static/*"]

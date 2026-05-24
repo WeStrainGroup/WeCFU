@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+*.so
+
+# distribution artifacts: tracked separately, see dist/.gitkeep
+# (uncomment the next line if you don't want to ship pre-built wheels)
+# dist/
+
+# pytest / mypy
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# venv
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# CFU-counter local runtime data — keep workspace runs out of git
+data/inputs/
+data/runs/
+data/uploads/
+tests/golden_*.csv
+
+# SAM weights
+*.pth

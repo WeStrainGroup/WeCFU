@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>CFU counter</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>CFU counter</h1>
+    <div id="batch-controls">
+      <label>批次
+        <select id="batch-select"></select>
+      </label>
+      <button id="btn-run">全部计数</button>
+      <button id="btn-export-csv">导出 CSV</button>
+      <button id="btn-export-zip">导出打包 (CSV+图)</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </header>
+
+  <main>
+    <aside id="sidebar">
+      <div id="dropzone">
+        <p>把图片或文件夹拖到这里<br/><span class="muted">（仅建符号链接，原图不动）</span></p>
+        <p class="muted">或粘贴绝对路径：</p>
+        <input id="path-input" placeholder="/path/to/plate/photos" />
+        <button id="btn-ingest">导入路径</button>
+      </div>
+      <div id="image-list"></div>
+    </aside>
+
+    <section id="viewer">
+      <div id="viewer-header">
+        <div>
+          <span id="current-name" class="muted">— 选一张图 —</span>
+          <span id="meta-tag"></span>
+        </div>
+        <div>
+          <span id="count-badge" class="badge">0 CFU</span>
+          <button id="btn-undo" title="撤销 (Cmd/Ctrl-Z)">↶ 撤销</button>
+          <button id="btn-rerun">重新计数</button>
+          <button id="btn-sam" title="对密集板用 SAM 兜底">SAM</button>
+          <button id="btn-mark-reviewed">标记已复核</button>
+        </div>
+      </div>
+
+      <div id="canvas-wrap">
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <div id="legend" class="muted">
+        <span class="dot dot-cv"></span>自动 (CV) ·
+        <span class="dot dot-sam"></span>SAM ·
+        <span class="dot dot-manual"></span>手动 ·
+        <b>左键</b> 空白处加菌落 · <b>右键</b> 圆圈删除 · <b>滚轮</b> 缩放 · <b>Cmd/Ctrl+拖拽</b> 平移 · <b>← →</b> 上/下一张
+      </div>
+
+      <div id="params">
+        <label>预设
+          <select id="preset-select">
+            <option value="white">白菌落（默认）</option>
+            <option value="cream">乳白/淡黄</option>
+            <option value="yellow">黄色菌落</option>
+            <option value="any">任意亮色</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+        <label>新增半径(px) <input type="number" id="p-radius" value="40" min="3" max="300"/></label>
+        <label>min_value <input type="number" id="p-min-value" value="200" min="0" max="255"/></label>
+        <label>max_saturation <input type="number" id="p-max-sat" value="60" min="0" max="255"/></label>
+        <label>plate_inset <input type="number" id="p-inset" value="0.82" step="0.01" min="0.5" max="1.0"/></label>
+        <label>min_circularity <input type="number" id="p-circ" value="0.55" step="0.05" min="0" max="1"/></label>
+        <label>min_area_frac <input type="number" id="p-min-area" value="0.0001" step="0.00005" min="0" max="0.01"/></label>
+        <label>peak_min_dist <input type="number" id="p-peak" value="15" min="2" max="80"/></label>
+        <label><input type="checkbox" id="p-preview"/> 实时阈值预览</label>
+        <button id="btn-apply-params">应用并重跑</button>
+      </div>
+
+      <div id="notes-bar">
+        <label>备注：</label>
+        <input id="notes-input" placeholder="给这一张写一句备注，导出时会写进 CSV" />
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
