@@ -1,10 +1,44 @@
 # 把 WeCFU 同步给协作者
 
-按"协作者麻烦程度从低到高"列出 3 条路。任选其一。
+## ✅ 已发布：WeStrainGroup anaconda channel
+
+`wecfu` 0.1.0 已 push 到 https://anaconda.org/WeStrainGroup/wecfu 。
+**协作者一行 conda install 即可：**
+
+```bash
+conda create -n wecfu -c westraingroup -c conda-forge wecfu -y
+conda activate wecfu
+wecfu serve
+```
+
+发给协作者的话术（直接复制粘贴）：
+
+> WeCFU 已发到我们组的 conda channel。装上 conda 后跑这一行就能用：
+> ```bash
+> conda create -n wecfu -c westraingroup -c conda-forge wecfu -y && conda activate wecfu && wecfu serve
+> ```
+> 浏览器会自动开 http://127.0.0.1:8765 。用法看仓库里的 USAGE.md。
+
+下次发新版本，本地：
+
+```bash
+cd ~/claude_code_workspace/WeF/WeCFU
+# 改完代码、commit
+# 把 meta.yaml 里 version 从 0.1.0 → 0.1.1
+conda build . -c conda-forge --no-anaconda-upload
+anaconda login --username westraingroup    # 密码：见你保存的笔记
+anaconda upload ~/miniconda3/conda-bld/noarch/wecfu-0.1.1-py_0.conda
+```
 
 ---
 
-## 路 A：通过 GitHub 仓库分发（推荐，长期维护用）
+## 备选：其它分发渠道
+
+按"协作者麻烦程度从低到高"列出 3 条备选路。
+
+---
+
+## 路 A：通过 GitHub 仓库分发（适合愿意改代码的协作者）
 
 **优点**：协作者一句 `git clone` 拿全套；你以后改了代码 `git push` 一键同步；自带版本号。
 **缺点**：需要你先把仓库推上 GitHub（10 分钟）。
