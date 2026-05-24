@@ -1,4 +1,4 @@
-"""Command-line entrypoints for cfu-counter."""
+"""Command-line entrypoints for wecfu."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _cmd_serve(args) -> int:
     url = f"http://127.0.0.1:{args.port}"
     if args.open:
         webbrowser.open(url)
-    print(f"cfu-counter serving at {url}  (workspace: {root})")
+    print(f"wecfu serving at {url}  (workspace: {root})")
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
     return 0
 
@@ -67,7 +67,7 @@ def _cmd_sam(args) -> int:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(prog="cfu-counter")
+    p = argparse.ArgumentParser(prog="wecfu")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pb = sub.add_parser("batch", help="non-interactive batch run")
@@ -81,8 +81,8 @@ def main() -> int:
     ps = sub.add_parser("serve", help="launch the local web GUI")
     ps.add_argument(
         "--root",
-        default="~/claude_code_workspace/WeF/cfu-counter/data",
-        help="workspace root containing inputs/ and runs/",
+        default="./data",
+        help="workspace root containing inputs/ and runs/ (default: ./data)",
     )
     ps.add_argument("--port", type=int, default=8765)
     ps.add_argument("--no-open", dest="open", action="store_false")

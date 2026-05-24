@@ -9,7 +9,7 @@
 
 1. 浏览器打开 https://github.com/new
 2. **Owner**：选你自己（或者你想放的组织）
-3. **Repository name**：建议填 `cfu-counter`
+3. **Repository name**：建议填 `WeCFU`
 4. **Description**（可选）：`Hybrid OpenCV + SAM colony counter with a local web GUI for culturomics plate photos.`
 5. **Visibility**：
    - 想让协作者公开看到 → **Public**
@@ -23,7 +23,7 @@
 
 7. 点 **Create repository**
 
-建好后页面会显示一串命令，复制其中的仓库地址（形如 `https://github.com/你的用户名/cfu-counter.git` 或 `git@github.com:你的用户名/cfu-counter.git`）。
+建好后页面会显示一串命令，复制其中的仓库地址（形如 `https://github.com/你的用户名/WeCFU.git` 或 `git@github.com:你的用户名/WeCFU.git`）。
 
 ---
 
@@ -48,10 +48,10 @@ gh auth login
 在终端里：
 
 ```bash
-cd ~/claude_code_workspace/WeF/cfu-counter
+cd ~/claude_code_workspace/WeF/WeCFU
 
 # 把仓库地址换成你刚才在第 1 步看到的那个
-git remote add origin https://github.com/你的用户名/cfu-counter.git
+git remote add origin https://github.com/你的用户名/WeCFU.git
 
 # 第一次推：把本地 main 分支推上去并设为默认上游
 git push -u origin main
@@ -65,7 +65,7 @@ git push -u origin main
 ## 之后改了代码怎么推
 
 ```bash
-cd ~/claude_code_workspace/WeF/cfu-counter
+cd ~/claude_code_workspace/WeF/WeCFU
 git add -A
 git commit -m "改了什么的简短说明"
 git push
@@ -78,12 +78,12 @@ git push
 让协作者去看你 GitHub 仓库的 `INSTALL.md`。基本就是：
 
 ```bash
-git clone https://github.com/你的用户名/cfu-counter.git
-cd cfu-counter
+git clone https://github.com/你的用户名/WeCFU.git
+cd WeCFU
 conda env create -f environment.yml
-conda activate cfu-counter
+conda activate WeCFU
 pip install -e .
-cfu-counter serve
+WeCFU serve
 ```
 
 ---
@@ -95,11 +95,11 @@ cfu-counter serve
 ```bash
 # 在本地已经构建好的 wheel 路径：
 ls dist/
-# cfu_counter-0.1.0-py3-none-any.whl
-# cfu_counter-0.1.0.tar.gz
+# wecfu-0.1.0-py3-none-any.whl
+# wecfu-0.1.0.tar.gz
 
 # 用 gh 创建一个 release 并附上 wheel
-gh release create v0.1.0 dist/cfu_counter-0.1.0-py3-none-any.whl dist/cfu_counter-0.1.0.tar.gz \
+gh release create v0.1.0 dist/wecfu-0.1.0-py3-none-any.whl dist/wecfu-0.1.0.tar.gz \
     --title "v0.1.0 — first internal release" \
     --notes "Internal test release for the WeF culturomics team. See USAGE.md."
 ```
@@ -107,7 +107,7 @@ gh release create v0.1.0 dist/cfu_counter-0.1.0-py3-none-any.whl dist/cfu_counte
 发布完，协作者就能直接：
 
 ```bash
-pip install https://github.com/你的用户名/cfu-counter/releases/download/v0.1.0/cfu_counter-0.1.0-py3-none-any.whl
+pip install https://github.com/你的用户名/WeCFU/releases/download/v0.1.0/wecfu-0.1.0-py3-none-any.whl
 ```
 
 ---

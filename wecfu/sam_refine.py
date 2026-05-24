@@ -3,7 +3,7 @@
 Lazily imports torch + segment_anything so the base install stays slim.
 Default checkpoint: ViT-B (sam_vit_b_01ec64.pth ~358 MB). The user is expected
 to download it once and point CFU_SAM_CHECKPOINT at it (or place it at
-~/.cache/cfu-counter/sam_vit_b.pth).
+~/.cache/wecfu/sam_vit_b.pth).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def _default_checkpoint() -> Path:
     return Path(
         os.environ.get(
             "CFU_SAM_CHECKPOINT",
-            str(Path.home() / ".cache" / "cfu-counter" / "sam_vit_b.pth"),
+            str(Path.home() / ".cache" / "wecfu" / "sam_vit_b.pth"),
         )
     )
 
@@ -37,16 +37,16 @@ def _ensure_available() -> None:
             "SAM fallback requires extras. Install with:\n"
             "    pip install segment-anything torch\n"
             "Then download the ViT-B checkpoint:\n"
-            "    mkdir -p ~/.cache/cfu-counter && curl -L "
+            "    mkdir -p ~/.cache/wecfu && curl -L "
             "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth "
-            "-o ~/.cache/cfu-counter/sam_vit_b.pth"
+            "-o ~/.cache/wecfu/sam_vit_b.pth"
         )
     ckpt = _default_checkpoint()
     if not ckpt.exists():
         raise RuntimeError(
             f"SAM checkpoint missing: {ckpt}\n"
             "Download with:\n"
-            "    mkdir -p ~/.cache/cfu-counter && curl -L "
+            "    mkdir -p ~/.cache/wecfu && curl -L "
             "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth "
             f"-o {ckpt}"
         )

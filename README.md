@@ -1,9 +1,9 @@
-# cfu-counter
+# WeCFU
 
-Local, MacOS-friendly **CFU (colony-forming unit) counter** for culturomics
+Local, macOS-friendly **CFU (colony-forming unit) counter** for culturomics
 plate photos. Drag a folder of plate images into a browser window, get
-auto-counted plates with each colony numbered, then click-review (accept /
-reject / add) and export a CSV ready for downstream analysis.
+auto-counted plates with each colony numbered, then click-review (add / delete)
+and export a CSV ready for downstream analysis.
 
 Designed to be small, dependency-light, and reproducible — not a black box.
 Built for the WeF culturomics dataset but applies to any standard top-down
@@ -14,14 +14,14 @@ glass-petri photo with light colonies on a darker agar.
 ```bash
 # 1. create the env (once)
 conda env create -f environment.yml
-conda activate cfu-counter
+conda activate wecfu
 pip install -e .
 
 # 2. launch the GUI; it opens at http://127.0.0.1:8765
-cfu-counter serve
+wecfu serve
 
 # 3. (optional) batch-mode for headless use
-cfu-counter batch /path/to/plate/photos --out runs/2026-05-21
+wecfu batch /path/to/plate/photos --out runs/2026-05-21
 ```
 
 In the GUI:
@@ -32,15 +32,15 @@ In the GUI:
 - Click **Run all** to auto-detect colonies.
 - Click a plate in the left list → it loads in the canvas with each
   detected colony numbered.
-- **Click** a circle → toggles accept (green) / reject (red).
-- **Shift-click** an empty spot → add a manual colony (cyan).
-- **Alt-click** a circle → permanently delete it.
-- **Cmd/⌘-drag** to pan, scroll to zoom.
-- Adjust the sliders (`min_value`, `max_saturation`, `plate_inset`,
-  `min_circularity`, …) and hit **Apply & re-run** if the auto pass missed.
-- Hit **Mark reviewed** when you've finished a plate.
-- **Export CSV** writes one row per plate with parsed metadata
-  (plate, gram, medium, dilution, atmo, day, rep, timestamp) and the count.
+- **Left-click** empty space → add a manual colony (cyan).
+- **Right-click** a circle → delete it.
+- **Cmd/Ctrl-Z** to undo, **← / →** for prev/next image, **Space** to mark reviewed.
+- **Cmd/Ctrl-drag** to pan, scroll to zoom.
+- Pick a colony-color **preset** (white / cream / yellow / any) or tweak the
+  sliders. Tick **live mask preview** to see in real time which pixels are
+  being treated as colonies.
+- **Export CSV** for just the counts, or **Export bundle (zip)** for CSV +
+  annotated overlay PNGs + per-image JSON state.
 
 ## Output
 
@@ -88,22 +88,23 @@ Two-layer pipeline; both layers operate on a single BGR image.
 
 For dense/touching plates the user clicks **SAM** on a specific image. We
 lazily import `segment_anything` (ViT-B; ~358 MB checkpoint at
-`~/.cache/cfu-counter/sam_vit_b.pth`) and run
+`~/.cache/wecfu/sam_vit_b.pth`) and run
 `SamAutomaticMaskGenerator` (`points_per_side=48`). The same area /
 circularity filter as Layer 1 is applied to SAM's masks. Lazy install:
 
 ```bash
 pip install segment-anything torch
-mkdir -p ~/.cache/cfu-counter
+mkdir -p ~/.cache/wecfu
 curl -L https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth \
-  -o ~/.cache/cfu-counter/sam_vit_b.pth
+  -o ~/.cache/wecfu/sam_vit_b.pth
 ```
 
 ### Manual layer
 
-Any plate the user touches (toggle / add / delete) is marked `reviewed=True`
-and skipped on subsequent batch runs (unless `--force`). The CSV records
-`n_manual_added` and `n_removed` so manual contributions stay auditable.
+Any plate the user touches (add / delete) is marked `reviewed=True` and
+skipped on subsequent batch runs (unless `--force`). The CSV records
+`n_manual` so manual additions stay auditable; the per-image JSON in the
+export bundle records every detection's origin (`cv` / `sam` / `manual`).
 
 ## Filename convention
 
@@ -121,8 +122,8 @@ metadata columns; counting still works.
 ## Project layout
 
 ```
-cfu-counter/
-├── cfu_counter/
+WeCFU/
+├── wecfu/
 │   ├── plate.py          # plate detection
 │   ├── segment.py        # Layer 1 CV pipeline
 │   ├── sam_refine.py     # Layer 2 SAM (lazy)
@@ -155,7 +156,7 @@ cfu-counter/
 
 ## Citing
 
-Please cite as: *cfu-counter v0.1 (WeF culturomics, 2026)*. A pre-print
+Please cite as: *WeCFU v0.1 (WeF culturomics, 2026)*. A pre-print
 describing the validation set and accuracy is in preparation; see the
 upcoming repository release for the BibTeX entry.
 

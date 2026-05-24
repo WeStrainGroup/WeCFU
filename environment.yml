@@ -1,4 +1,4 @@
-name: cfu-counter
+name: wecfu
 channels:
   - conda-forge
 dependencies:

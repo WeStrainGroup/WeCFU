@@ -1,4 +1,4 @@
-# CFU counter 使用说明（中文详细版）
+# WeCFU 使用说明（中文详细版）
 
 适用版本：v0.1
 适用系统：macOS / Linux（Windows 应该也行，但未测）
@@ -16,21 +16,21 @@
 只要装一次。
 
 ```bash
-# 1) 进 cfu-counter 项目目录
-cd ~/claude_code_workspace/WeF/cfu-counter
+# 1) 进 wecfu 项目目录
+cd ~/claude_code_workspace/WeF/wecfu
 
 # 2) 创建 conda 环境（约 3–5 分钟，下载 ~500 MB）
 conda env create -f environment.yml
 
 # 3) 激活并安装本工具
-conda activate cfu-counter
+conda activate wecfu
 pip install -e .
 ```
 
 验证一下能跑：
 
 ```bash
-cfu-counter --help
+wecfu --help
 ```
 
 应该看到 `batch / serve / sam` 三个子命令。
@@ -40,11 +40,11 @@ cfu-counter --help
 ## 2. 启动 GUI
 
 ```bash
-conda activate cfu-counter
-cfu-counter serve
+conda activate wecfu
+wecfu serve
 ```
 
-终端会显示 `cfu-counter serving at http://127.0.0.1:8765`，浏览器会自动打开这个地址（如果没自动开就手动复制粘贴）。
+终端会显示 `wecfu serving at http://127.0.0.1:8765`，浏览器会自动打开这个地址（如果没自动开就手动复制粘贴）。
 
 不想自动开浏览器，加 `--no-open`；换端口 `--port 9000`。
 
@@ -203,7 +203,7 @@ PXXVNN_G[+-]_<medium>_<dilution>_<aer|ana>_dayN_<rep>_<YYYYMMDD_HHMMSS>.jpg
 顶部 **「导出打包」** → 下载 `cfu_<批次>.zip`，包含：
 - `cfu_<批次>.csv`
 - `overlays/*.png`：每张图带标注的复核图（已裁到皿+灰色背景，可直接放论文 SI）
-- `detections/*.json`：每张图的"状态档案"（含每个菌落坐标、半径、来源、参数、备注、是否人工复核）。如果以后想完全复现这次计数，把 JSON 喂回 `cfu-counter` 就行。
+- `detections/*.json`：每张图的"状态档案"（含每个菌落坐标、半径、来源、参数、备注、是否人工复核）。如果以后想完全复现这次计数，把 JSON 喂回 `wecfu` 就行。
 
 ---
 
@@ -212,7 +212,7 @@ PXXVNN_G[+-]_<medium>_<dilution>_<aer|ana>_dayN_<rep>_<YYYYMMDD_HHMMSS>.jpg
 完全跳过 GUI，直接产 CSV：
 
 ```bash
-cfu-counter batch /path/to/photos --out /path/to/run_dir
+wecfu batch /path/to/photos --out /path/to/run_dir
 ```
 
 输出：
@@ -236,10 +236,10 @@ A：极少数情况下 Hough 会找错圆。表现是叠加图上灰圈不在皿
 A：不会。只要状态里 `reviewed=True`（你点过"标记已复核"或动过菌圈），批跑就跳过这张。除非加 `--force`。
 
 **Q：我能换台机器继续吗？**
-A：可以。把 `data/inputs/<批次>/` 和 `data/runs/<批次>/detections/` 拷过去（注意原图路径要么真存在要么改成上传），重启 `cfu-counter serve` 即可。
+A：可以。把 `data/inputs/<批次>/` 和 `data/runs/<批次>/detections/` 拷过去（注意原图路径要么真存在要么改成上传），重启 `wecfu serve` 即可。
 
 **Q：图很多很卡？**
-A：单 worker 默认。你可以多开几个 batch 分批处理；或者用 `cfu-counter batch ...` 命令行多核场景。
+A：单 worker 默认。你可以多开几个 batch 分批处理；或者用 `wecfu batch ...` 命令行多核场景。
 
 ---
 
@@ -256,13 +256,13 @@ A：单 worker 默认。你可以多开几个 batch 分批处理；或者用 `cf
 
 ## 11. 反馈与改进
 
-代码全部在 `cfu_counter/` 包内，每个模块单独可读：
+代码全部在 `wecfu/` 包内，每个模块单独可读：
 
 - `plate.py` 改皿定位
 - `segment.py` 改算法/加预设
 - `overlay.py` 改导出图样式
 - `server/static/app.js` 改前端交互
 
-调完用 `pip install -e .` 不用重装，重启 `cfu-counter serve` 即可生效。
+调完用 `pip install -e .` 不用重装，重启 `wecfu serve` 即可生效。
 
 祝数菌愉快。

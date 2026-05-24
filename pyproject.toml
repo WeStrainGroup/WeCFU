@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cfu-counter"
+name = "wecfu"
 version = "0.1.0"
-description = "Hybrid OpenCV + SAM CFU counter for culturomics plate photos with a local web GUI"
+description = "WeCFU — hybrid OpenCV + SAM CFU counter for culturomics plate photos with a local web GUI"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "WeF culturomics team" }]
@@ -27,11 +27,11 @@ sam = ["segment-anything", "torch"]
 dev = ["pytest"]
 
 [project.scripts]
-cfu-counter = "cfu_counter.cli:main"
+wecfu = "wecfu.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["cfu_counter*"]
+include = ["wecfu*"]
 
 [tool.setuptools.package-data]
-"cfu_counter.server" = ["static/*"]
+"wecfu.server" = ["static/*"]

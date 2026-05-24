@@ -1,4 +1,4 @@
-from cfu_counter.naming import parse
+from wecfu.naming import parse
 
 
 def test_parse_standard():
