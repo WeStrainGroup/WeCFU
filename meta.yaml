@@ -1,0 +1,65 @@
+{% set name = "wecfu" %}
+{% set version = "0.1.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  # Use git so .gitignore is honoured — keeps `data/`, build artefacts,
+  # and the user's input photos OUT of the package snapshot.
+  git_url: .
+  git_rev: HEAD
+
+build:
+  number: 0
+  noarch: python
+  include_recipe: false   # don't embed the recipe+source into info/ (smaller)
+  script: "{{ PYTHON }} -m pip install . -vv --no-deps --ignore-installed"
+  entry_points:
+    - wecfu = wecfu.cli:main
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=68
+    - wheel
+  run:
+    - python >=3.10
+    - numpy
+    - scipy
+    - scikit-image
+    - py-opencv
+    - pillow
+    - pandas
+    - fastapi
+    - uvicorn
+    - python-multipart
+
+test:
+  imports:
+    - wecfu
+    - wecfu.cli
+    - wecfu.plate
+    - wecfu.segment
+    - wecfu.pipeline
+    - wecfu.server.app
+  commands:
+    - wecfu --help
+
+about:
+  home: https://github.com/WeStrainGroup/WeCFU
+  license: MIT
+  license_file: LICENSE
+  summary: "WeCFU — hybrid OpenCV + SAM CFU counter for culturomics plate photos with a local web GUI"
+  description: |
+    WeCFU is a local CFU (colony-forming unit) counter for culturomics plate
+    photos. It exposes a drag-and-drop browser GUI plus a CLI for batch runs.
+    Layer 1: classical OpenCV pipeline (Hough plate detection, HSV white-gate,
+    watershed). Layer 2: optional Meta Segment Anything fallback for dense
+    plates (lazy install). Designed for macOS and Linux.
+
+extra:
+  recipe-maintainers:
+    - WeStrainGroup
