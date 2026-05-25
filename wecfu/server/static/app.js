@@ -1,13 +1,16 @@
-// CFU counter — frontend.
+// WeCFU — frontend (v0.1.1).
+//
 // Click model:
-//   • Left click on empty plate → add a manual colony (default radius)
-//   • Right click on a circle    → delete it
-//   • Wheel → zoom (anchored at cursor)
-//   • Cmd/Ctrl + drag → pan
-//   • ← / →                       prev/next image
-//   • Cmd/Ctrl-Z                  undo last action (server replays/inserts)
+//   • Left click on empty plate area  → add a manual colony (instant, optimistic)
+//   • Right click on a circle         → delete it             (instant, optimistic)
+//   • Wheel                            → zoom (anchored at cursor)
+//   • Cmd/Ctrl + drag                 → pan
+//   • ← / →                            → prev/next image
+//   • Space                            → mark reviewed
+//   • Cmd/Ctrl-Z                      → undo last add/delete
 
 const $ = (id) => document.getElementById(id);
+const { t, applyI18n, setLang, getLang, LANG_NAMES } = window.WECFU_I18N;
 
 const PRESETS = {
   white:  { min_value: 200, max_saturation: 60,  min_circularity: 0.55 },
@@ -17,16 +20,18 @@ const PRESETS = {
 };
 
 const state = {
-  batch: null,
+  batch: null,         // current internal storage key (auto-managed, not user-facing)
   imageName: null,
   imageList: [],
   detections: [],
   plate: null,
   img: null,
-  view: { zoom: 1, ox: 0, oy: 0 },
+  imgUrl: null,
+  view: { zoom: 1, ox: 0, oy: 0, ready: false },
   dragPan: null,
-  history: [],              // for undo: list of { kind:'add'|'delete', det }
-  maskPreview: null,        // HTMLImageElement when live preview is on
+  history: [],
+  maskPreview: null,
+  saveDirHandle: null, // File System Access API directory handle (Chromium)
 };
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -53,44 +58,41 @@ function paramsBody() {
 }
 
 const enc = encodeURIComponent;
-function imgURL(suffix) {
-  return `/api/batch/${enc(state.batch)}/image/${enc(state.imageName)}${suffix}`;
-}
+function imgURL(suffix) { return `/api/batch/${enc(state.batch)}/image/${enc(state.imageName)}${suffix}`; }
 
 // ── batches + image list ─────────────────────────────────────────────────
 
-async function loadBatches() {
+async function loadDefaultBatch() {
   const r = await fetch('/api/batches').then(r => r.json());
-  const sel = $('batch-select');
-  sel.innerHTML = '';
-  for (const b of r.batches) {
-    const opt = document.createElement('option');
-    opt.value = b; opt.textContent = b;
-    sel.appendChild(opt);
-  }
-  const want = r.default && r.batches.includes(r.default) ? r.default : r.batches[0];
-  if (want) {
-    sel.value = want;
-    state.batch = want;
-    await loadImages();
-  }
+  state.batch = r.default;
+  if (r.batches.length && !r.batches.includes(state.batch)) state.batch = r.batches[0];
+  await loadImages();
 }
 
 async function loadImages() {
   if (!state.batch) return;
   const r = await fetch(`/api/batch/${enc(state.batch)}/images`).then(r => r.json());
   state.imageList = r.images;
+  renderImageList();
+}
+
+function renderImageList() {
   const list = $('image-list');
   list.innerHTML = '';
-  for (const it of r.images) {
+  for (const it of state.imageList) {
     const row = document.createElement('div');
     row.className = 'image-row';
     if (it.reviewed) row.classList.add('reviewed');
     if (it.low_confidence) row.classList.add('low-conf');
     if (it.notes) row.classList.add('has-notes');
     if (it.name === state.imageName) row.classList.add('selected');
+
+    const flagTitle = it.reviewed ? t('flagReviewed')
+                     : it.low_confidence ? t('flagLowConfidence')
+                     : !it.processed ? t('flagUnprocessed') : '';
+
     row.innerHTML = `
-      <span class="row-flag"></span>
+      <span class="row-flag" title="${flagTitle}"></span>
       <span class="row-name" title="${it.name}${it.notes ? ' — ' + it.notes : ''}">${it.name}</span>
       <span class="row-count">${it.processed ? it.count : '–'}</span>`;
     row.addEventListener('click', () => selectImage(it.name));
@@ -99,42 +101,51 @@ async function loadImages() {
 }
 
 async function selectImage(name) {
+  if (state.imageName === name) return;
   state.imageName = name;
   state.history = [];
+  state.view.ready = false; // force one-time refit when the image changes
   $('current-name').textContent = name;
-  await loadImages();
-  await loadDetections();
+  renderImageList();
+  await loadDetections({ refit: true });
   $('notes-input').value = state.imageList.find(i => i.name === name)?.notes || '';
 }
 
-async function loadDetections() {
+async function loadDetections({ refit = false } = {}) {
   if (!state.batch || !state.imageName) return;
   const r = await fetch(imgURL('/detections'));
   if (!r.ok) {
     state.detections = []; state.plate = null;
-    await loadRawImage(); fitToCanvas(); draw();
-    $('count-badge').textContent = '— (未计数)';
+    await loadRawImage();
+    if (refit || !state.view.ready) { fitToCanvas(); state.view.ready = true; }
+    draw();
+    $('count-badge').textContent = t('notProcessed');
     $('meta-tag').textContent = '';
     return;
   }
   const data = await r.json();
   state.detections = data.detections;
   state.plate = data.plate;
-  $('count-badge').textContent = `${data.detections.length} CFU`;
-  const lc = data.diagnostics?.low_confidence ? ' · 低置信' : '';
-  const rv = data.reviewed ? ' · 已复核' : '';
+  updateCountBadge();
+  const lc = data.diagnostics?.low_confidence ? ` · ${t('metaLowConf')}` : '';
+  const rv = data.reviewed ? ` · ${t('metaReviewed')}` : '';
   $('meta-tag').textContent = `· ${data.method || 'cv'}${rv}${lc}`;
   await loadRawImage();
-  fitToCanvas();
+  if (refit || !state.view.ready) { fitToCanvas(); state.view.ready = true; }
   draw();
 }
 
+function updateCountBadge() {
+  $('count-badge').textContent = `${state.detections.length} ${t('cfuSuffix')}`;
+}
+
 async function loadRawImage() {
-  if (!state.batch || !state.imageName) return;
+  const url = imgURL('/raw');
+  if (state.imgUrl === url && state.img) return; // already loaded
   return new Promise(resolve => {
     const im = new Image();
-    im.onload = () => { state.img = im; resolve(); };
-    im.src = imgURL('/raw') + `?t=${Date.now()}`;
+    im.onload = () => { state.img = im; state.imgUrl = url; resolve(); };
+    im.src = url;
   });
 }
 
@@ -153,7 +164,6 @@ function fitToCanvas() {
   const c = $('canvas');
   if (!state.img) return;
   const ratio = window.devicePixelRatio || 1;
-  // If we have a plate circle, fit the plate bbox; else fit the whole image.
   let fitW = state.img.width, fitH = state.img.height, cxImg = state.img.width / 2, cyImg = state.img.height / 2;
   if (state.plate) {
     const pad = 24;
@@ -164,7 +174,6 @@ function fitToCanvas() {
   }
   const scale = Math.min(c.width / fitW, c.height / fitH);
   state.view.zoom = scale / ratio;
-  // center on cxImg, cyImg
   state.view.ox = (c.width / ratio) / 2 - cxImg * state.view.zoom;
   state.view.oy = (c.height / ratio) / 2 - cyImg * state.view.zoom;
 }
@@ -185,17 +194,14 @@ function draw() {
   ctx.translate(state.view.ox, state.view.oy);
   ctx.scale(state.view.zoom, state.view.zoom);
 
-  // Either show the raw photo, or the live mask preview (which already contains the image tinted green).
   const baseImg = state.maskPreview || state.img;
   if (state.maskPreview && state.plate) {
-    // mask preview is cropped to plate bbox — draw it at the bbox origin
     const pad = 24;
     const x0 = state.plate.cx - state.plate.r - pad;
     const y0 = state.plate.cy - state.plate.r - pad;
     ctx.drawImage(baseImg, x0, y0);
   } else {
     ctx.drawImage(baseImg, 0, 0);
-    // mask outside plate with neutral grey
     if (state.plate) {
       ctx.save();
       ctx.beginPath();
@@ -207,7 +213,6 @@ function draw() {
     }
   }
 
-  // plate ring
   if (state.plate) {
     ctx.strokeStyle = 'rgba(170,170,170,0.9)';
     ctx.lineWidth = 2 / state.view.zoom;
@@ -219,8 +224,7 @@ function draw() {
   ctx.lineWidth = 3 / state.view.zoom;
   ctx.font = `${Math.max(11, 16 / state.view.zoom)}px sans-serif`;
   for (const d of state.detections) {
-    const color = d.source === 'manual' ? '#28a0f0'
-                : d.source === 'sam' ? '#c83cdc' : '#28dc28';
+    const color = d.source === 'manual' ? '#28a0f0' : '#28dc28';
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -229,10 +233,10 @@ function draw() {
     ctx.fillText(String(d.id), d.cx + d.r + 4, d.cy - 4);
   }
   ctx.restore();
-  $('count-badge').textContent = `${state.detections.length} CFU`;
+  updateCountBadge();
 }
 
-// ── interactions ─────────────────────────────────────────────────────────
+// ── interactions (optimistic) ────────────────────────────────────────────
 
 function findHit(ix, iy) {
   let best = null, bestArea = Infinity;
@@ -246,39 +250,60 @@ function findHit(ix, iy) {
   return best;
 }
 
+function localNextId() {
+  return state.detections.reduce((m, d) => Math.max(m, d.id), 0) + 1;
+}
+
+let _imgListDirty = false;
+function debouncedImageListRefresh() {
+  if (_imgListDirty) return;
+  _imgListDirty = true;
+  setTimeout(() => { _imgListDirty = false; loadImages(); }, 400);
+}
+
 async function onMouseDownCanvas(evt) {
-  // pan with cmd/ctrl
   if (evt.metaKey || evt.ctrlKey || evt.button === 1) {
     evt.preventDefault();
     state.dragPan = { sx: evt.clientX, sy: evt.clientY, ox: state.view.ox, oy: state.view.oy };
-    return;
   }
-  if (evt.button === 2) return; // right click handled separately
 }
 
 async function onClickCanvas(evt) {
-  if (state.dragPan) return; // was a drag
+  if (state.dragPan) return;
   if (evt.metaKey || evt.ctrlKey) return;
   if (!state.batch || !state.imageName || !state.img) return;
+
   const rect = $('canvas').getBoundingClientRect();
   const sx = evt.clientX - rect.left, sy = evt.clientY - rect.top;
   const [ix, iy] = screenToImg(sx, sy);
-  // ignore clicks outside the plate
+
   if (state.plate) {
     const dx = ix - state.plate.cx, dy = iy - state.plate.cy;
     if (dx * dx + dy * dy > state.plate.r * state.plate.r) return;
   }
-  const hit = findHit(ix, iy);
-  if (hit) return; // left click on an existing circle = no-op
+  if (findHit(ix, iy)) return; // left click on existing circle = no-op
+
+  // Optimistic add: paint immediately, sync to server in background.
   const r = parseFloat($('p-radius').value) || 40;
-  const resp = await fetch(imgURL('/detections'), {
+  const tempId = -Date.now();
+  const optimisticDet = { id: tempId, cx: ix, cy: iy, r, score: 1, accepted: true, source: 'manual' };
+  state.detections.push(optimisticDet);
+  draw();
+  state.history.push({ kind: 'add', tempId });
+
+  fetch(imgURL('/detections'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ cx: ix, cy: iy, r }),
-  }).then(r => r.json());
-  state.history.push({ kind: 'add', id: resp.id });
-  await loadDetections();
-  loadImages();
+  }).then(r => r.json()).then(resp => {
+    const d = state.detections.find(x => x.id === tempId);
+    if (d) d.id = resp.id;
+    // history entry: replace tempId with real id
+    const h = state.history.find(h => h.kind === 'add' && h.tempId === tempId);
+    if (h) h.id = resp.id;
+    draw();
+    debouncedImageListRefresh();
+  }).catch(() => { /* swallow; UI is optimistic */ });
 }
 
 async function onContextMenu(evt) {
@@ -289,10 +314,16 @@ async function onContextMenu(evt) {
   const [ix, iy] = screenToImg(sx, sy);
   const hit = findHit(ix, iy);
   if (!hit) return;
-  state.history.push({ kind: 'delete', det: { ...hit } });
-  await fetch(imgURL(`/detections/${hit.id}`), { method: 'DELETE' });
-  await loadDetections();
-  loadImages();
+
+  // Optimistic delete
+  const snapshot = { ...hit };
+  state.detections = state.detections.filter(d => d.id !== hit.id);
+  draw();
+  state.history.push({ kind: 'delete', det: snapshot });
+
+  fetch(imgURL(`/detections/${hit.id}`), { method: 'DELETE' })
+    .then(() => debouncedImageListRefresh())
+    .catch(() => { /* swallow */ });
 }
 
 function onWheel(evt) {
@@ -321,16 +352,24 @@ async function undo() {
   const last = state.history.pop();
   if (!last) return;
   if (last.kind === 'add') {
-    await fetch(imgURL(`/detections/${last.id}`), { method: 'DELETE' });
+    const id = last.id ?? last.tempId;
+    state.detections = state.detections.filter(d => d.id !== id);
+    draw();
+    if (last.id) fetch(imgURL(`/detections/${last.id}`), { method: 'DELETE' });
   } else if (last.kind === 'delete') {
-    await fetch(imgURL('/detections'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+    const tempId = -Date.now();
+    state.detections.push({ ...last.det, id: tempId });
+    draw();
+    fetch(imgURL('/detections'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ cx: last.det.cx, cy: last.det.cy, r: last.det.r }),
+    }).then(r => r.json()).then(resp => {
+      const d = state.detections.find(x => x.id === tempId);
+      if (d) d.id = resp.id;
+      draw();
     });
   }
-  await loadDetections();
-  loadImages();
+  debouncedImageListRefresh();
 }
 
 function moveSelection(delta) {
@@ -365,14 +404,12 @@ async function refreshMaskPreview() {
 // ── ingestion ───────────────────────────────────────────────────────────
 
 async function ingestPath(p) {
-  setStatus('导入中…');
+  setStatus(t('statusIngesting'));
   const r = await fetch('/api/ingest', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ paths: [p] }),
   }).then(r => r.json());
-  setStatus(`已建链 ${r.linked} 个文件到批次 ${r.batch}`);
-  await loadBatches();
-  $('batch-select').value = r.batch;
+  setStatus('');
   state.batch = r.batch;
   await loadImages();
 }
@@ -382,11 +419,9 @@ async function uploadFiles(fileList) {
   const fd = new FormData();
   fd.append('batch', batch);
   for (const f of fileList) fd.append('files', f);
-  setStatus(`上传 ${fileList.length} 个文件…`);
+  setStatus(t('statusUploading'));
   await fetch('/api/upload', { method: 'POST', body: fd });
-  setStatus(`已上传到批次 ${batch}`);
-  await loadBatches();
-  $('batch-select').value = batch;
+  setStatus('');
   state.batch = batch;
   await loadImages();
 }
@@ -406,16 +441,109 @@ async function walkDir(entry, out) {
   });
 }
 
+// ── export modal ────────────────────────────────────────────────────────
+
+let _exportFormat = 'csv';
+
+function openExportModal(format) {
+  _exportFormat = format;
+  // Default filename: input image name if exactly one image, else session label
+  let base;
+  if (state.imageList.length === 1) {
+    base = state.imageList[0].name.replace(/\.[^.]+$/, '');
+  } else if (state.imageName) {
+    base = `wecfu_${state.batch}`;
+  } else {
+    base = `wecfu_${state.batch}`;
+  }
+  const ext = format === 'csv' ? '.csv' : '.zip';
+  $('export-filename').value = base + ext;
+  $('export-backdrop').hidden = false;
+  $('export-format-row').hidden = true; // we know format from which button was clicked
+  $('export-filename').focus();
+  $('export-filename').select();
+}
+
+async function pickSaveLocation() {
+  // Chrome / Edge support showDirectoryPicker; Safari / Firefox do not.
+  if (!window.showDirectoryPicker) {
+    alert(t('exportSaveLocationDefault'));
+    return;
+  }
+  try {
+    state.saveDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    $('export-location-btn').textContent = state.saveDirHandle.name + '/';
+  } catch (_) { /* cancelled */ }
+}
+
+async function doExport() {
+  const fname = $('export-filename').value.trim() || `wecfu_${state.batch}.${_exportFormat}`;
+  const ext = _exportFormat === 'csv' ? '.csv' : '.zip';
+  const finalName = fname.toLowerCase().endsWith(ext) ? fname : fname + ext;
+  const url = `/api/batch/${enc(state.batch)}/export.${_exportFormat}?filename=${enc(finalName)}`;
+
+  setStatus(t('statusProcessing'));
+  const resp = await fetch(url);
+  if (!resp.ok) { alert('Export failed'); setStatus(''); return; }
+  const blob = await resp.blob();
+
+  if (state.saveDirHandle && window.showDirectoryPicker) {
+    try {
+      const fh = await state.saveDirHandle.getFileHandle(finalName, { create: true });
+      const w = await fh.createWritable();
+      await w.write(blob); await w.close();
+      setStatus(t('statusDone'));
+      $('export-backdrop').hidden = true;
+      return;
+    } catch (e) {
+      console.warn('save to directory failed, falling back to download', e);
+    }
+  }
+
+  // Fallback: regular browser download
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = u; a.download = finalName;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(u);
+  setStatus(t('statusDone'));
+  $('export-backdrop').hidden = true;
+}
+
+// ── help modal ──────────────────────────────────────────────────────────
+
+function openHelp() {
+  $('help-body').innerHTML = t('helpBody');
+  $('modal-backdrop').hidden = false;
+}
+function closeHelp() { $('modal-backdrop').hidden = true; }
+
+// ── language switcher ──────────────────────────────────────────────────
+
+function populateLangSelect() {
+  const sel = $('lang-select');
+  sel.innerHTML = '';
+  for (const [code, name] of Object.entries(LANG_NAMES)) {
+    const opt = document.createElement('option');
+    opt.value = code; opt.textContent = name;
+    sel.appendChild(opt);
+  }
+  sel.value = getLang();
+  sel.addEventListener('change', e => {
+    setLang(e.target.value);
+    // re-render anything that has translated text in JS
+    renderImageList();
+    updateCountBadge();
+    if ($('help-body').innerHTML) $('help-body').innerHTML = t('helpBody');
+  });
+}
+
 // ── wiring ──────────────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
-  await loadBatches();
-
-  $('batch-select').addEventListener('change', async e => {
-    state.batch = e.target.value;
-    state.imageName = null;
-    await loadImages();
-  });
+  applyI18n();
+  populateLangSelect();
+  await loadDefaultBatch();
 
   $('btn-ingest').addEventListener('click', async () => {
     const p = $('path-input').value.trim();
@@ -424,33 +552,24 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   $('btn-run').addEventListener('click', async () => {
     if (!state.batch) return;
-    setStatus('计数批次中…');
-    const r = await fetch(`/api/batch/${enc(state.batch)}/run?force=false`, {
+    setStatus(t('statusProcessing'));
+    await fetch(`/api/batch/${enc(state.batch)}/run?force=false`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(paramsBody()),
-    }).then(r => r.json());
-    setStatus(`完成 ${r.processed} 张`);
+    });
+    setStatus(t('statusDone'));
     await loadImages();
     if (state.imageName) await loadDetections();
   });
 
   $('btn-rerun').addEventListener('click', async () => {
     if (!state.batch || !state.imageName) return;
-    setStatus('重跑当前图…');
+    setStatus(t('statusProcessing'));
     await fetch(imgURL('/run'), {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(paramsBody()),
     });
-    setStatus('完成');
-    await loadDetections(); loadImages();
-  });
-
-  $('btn-sam').addEventListener('click', async () => {
-    if (!state.batch || !state.imageName) return;
-    setStatus('SAM 运行中 (CPU 大约 30s)…');
-    const r = await fetch(imgURL('/sam'), { method: 'POST' });
-    if (!r.ok) { alert('SAM 失败:\n' + await r.text()); setStatus('SAM 不可用'); return; }
-    setStatus('SAM 完成');
+    setStatus(t('statusDone'));
     await loadDetections(); loadImages();
   });
 
@@ -462,15 +581,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   $('btn-apply-params').addEventListener('click', () => $('btn-rerun').click());
 
-  $('btn-export-csv').addEventListener('click', () => {
-    if (!state.batch) return;
-    window.location = `/api/batch/${enc(state.batch)}/export.csv`;
-  });
+  $('btn-export-csv').addEventListener('click', () => state.batch && openExportModal('csv'));
+  $('btn-export-zip').addEventListener('click', () => state.batch && openExportModal('zip'));
+  $('btn-export-cancel').addEventListener('click', () => { $('export-backdrop').hidden = true; });
+  $('btn-export-confirm').addEventListener('click', doExport);
+  $('export-location-btn').addEventListener('click', pickSaveLocation);
 
-  $('btn-export-zip').addEventListener('click', () => {
-    if (!state.batch) return;
-    window.location = `/api/batch/${enc(state.batch)}/export.zip`;
-  });
+  $('btn-help').addEventListener('click', openHelp);
+  $('btn-help-close').addEventListener('click', closeHelp);
+  $('modal-backdrop').addEventListener('click', e => { if (e.target.id === 'modal-backdrop') closeHelp(); });
+  $('export-backdrop').addEventListener('click', e => { if (e.target.id === 'export-backdrop') $('export-backdrop').hidden = true; });
 
   $('btn-undo').addEventListener('click', undo);
 
@@ -506,9 +626,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('resize', () => { fitToCanvas(); draw(); });
 
   window.addEventListener('keydown', e => {
-    // skip typing in inputs
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
     if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
+    if (e.key === 'Escape') { closeHelp(); $('export-backdrop').hidden = true; return; }
     if (e.key === 'ArrowRight' || e.key === 'j') moveSelection(1);
     else if (e.key === 'ArrowLeft' || e.key === 'k') moveSelection(-1);
     else if (e.key === ' ') {
@@ -517,7 +637,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // dropzone
   const dz = $('dropzone');
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragging'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('dragging'));

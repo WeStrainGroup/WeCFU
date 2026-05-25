@@ -1,5 +1,5 @@
 {% set name = "wecfu" %}
-{% set version = "0.1.0" %}
+{% set version = "0.1.1" %}
 
 package:
   name: {{ name|lower }}
@@ -52,13 +52,13 @@ about:
   home: https://github.com/WeStrainGroup/WeCFU
   license: MIT
   license_file: LICENSE
-  summary: "WeCFU — hybrid OpenCV + SAM CFU counter for culturomics plate photos with a local web GUI"
+  summary: "WeCFU — a friendly, interactive, web-based colony counter for petri dish photos"
   description: |
-    WeCFU is a local CFU (colony-forming unit) counter for culturomics plate
-    photos. It exposes a drag-and-drop browser GUI plus a CLI for batch runs.
-    Layer 1: classical OpenCV pipeline (Hough plate detection, HSV white-gate,
-    watershed). Layer 2: optional Meta Segment Anything fallback for dense
-    plates (lazy install). Designed for macOS and Linux.
+    WeCFU is a local web tool for counting colonies on petri-dish photos.
+    Drop images in, get an automatic count, click to correct, export.
+    Multilingual UI, click-to-add / right-click-to-delete editing,
+    tunable parameters with a live threshold preview, and a CSV / zip
+    export with annotated images.
 
 extra:
   recipe-maintainers:

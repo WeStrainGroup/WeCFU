@@ -1,3 +1,3 @@
-"""CFU counter — hybrid OpenCV + SAM colony counting for culturomics plate photos."""
+"""WeCFU — a friendly, web-based colony counter for petri dish photos."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

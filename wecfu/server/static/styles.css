@@ -1,10 +1,10 @@
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; background: #1d1f23; color: #e4e6eb; }
+html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Hiragino Sans", sans-serif; background: #1d1f23; color: #e4e6eb; }
 body { display: flex; flex-direction: column; }
 
 header { display: flex; align-items: center; padding: 10px 16px; border-bottom: 1px solid #2d3036; background: #14161a; gap: 16px; }
 header h1 { margin: 0; font-size: 18px; font-weight: 600; }
-#batch-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#top-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 .muted { color: #8b8f99; font-size: 12px; }
 
@@ -23,7 +23,7 @@ aside#sidebar { width: 300px; min-width: 300px; border-right: 1px solid #2d3036;
 .image-row.selected { background: #2b4365; }
 .image-row .row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-row .row-count { font-weight: 600; min-width: 26px; text-align: right; }
-.image-row .row-flag { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+.image-row .row-flag { width: 8px; height: 8px; border-radius: 50%; background: #555; cursor: help; }
 .image-row.reviewed .row-flag { background: #54d486; }
 .image-row.low-conf .row-flag { background: #e3a73d; }
 .image-row.has-notes::after { content: '✎'; opacity: 0.7; font-size: 11px; }
@@ -41,7 +41,6 @@ canvas#canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
 #legend { padding: 6px 16px; font-size: 11px; border-top: 1px solid #2d3036; background: #181a1f; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
 .dot-cv { background: #28dc28; }
-.dot-sam { background: #c83cdc; }
 .dot-manual { background: #28a0f0; }
 
 #params { padding: 8px 16px; border-top: 1px solid #2d3036; display: flex; flex-wrap: wrap; gap: 10px; background: #14161a; align-items: center; font-size: 12px; }
@@ -54,5 +53,35 @@ canvas#canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
 button { background: #2b4365; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
 button:hover { background: #3c5b88; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: #2d8059; }
+button.primary:hover { background: #36996c; }
 
 select { background: #0f1115; color: #e4e6eb; border: 1px solid #333; border-radius: 4px; padding: 4px 8px; }
+
+/* ── modal ───────────────────────────────────────────────────────────── */
+#modal-backdrop, #export-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  z-index: 100; display: flex; align-items: center; justify-content: center;
+}
+#help-modal, #export-modal {
+  background: #1d1f23; color: #e4e6eb; border: 1px solid #2d3036; border-radius: 8px;
+  width: min(700px, 92vw); max-height: 88vh; display: flex; flex-direction: column;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+}
+#export-modal { width: min(440px, 90vw); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-bottom: 1px solid #2d3036; }
+.modal-header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.modal-body { padding: 16px 18px; overflow-y: auto; line-height: 1.55; font-size: 13px; }
+.modal-body h3 { margin: 14px 0 6px 0; font-size: 14px; color: #c7cad1; }
+.modal-body h3:first-child { margin-top: 0; }
+.modal-body ul { margin: 0; padding-left: 18px; }
+.modal-body p { margin: 6px 0; }
+.modal-body label.stacked { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.modal-body label.stacked > span { font-size: 12px; color: #c7cad1; }
+.modal-body input[type=text], .modal-body input:not([type]), .modal-body #export-filename {
+  width: 100%; padding: 6px 8px; background: #0f1115; color: #e4e6eb; border: 1px solid #333; border-radius: 4px;
+}
+#export-format-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-size: 13px; }
+#export-location-btn { width: 100%; text-align: left; background: #0f1115; border: 1px solid #333; }
+#export-location-btn:hover { background: #1a1c20; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }

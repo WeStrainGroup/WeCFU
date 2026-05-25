@@ -1,4 +1,9 @@
-"""FastAPI backend for the CFU counter GUI."""
+"""FastAPI backend for the WeCFU GUI.
+
+v0.1.1: simplified surface — no SAM endpoint exposed; slim CSV; export
+accepts a custom filename. The "batch" concept still exists internally
+for storage organisation but is auto-managed and not surfaced in the UI.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,6 @@ import json
 import shutil
 import time
 import zipfile
-from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,7 +22,6 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..naming import parse as parse_name
 from ..overlay import render
 from ..pipeline import process_image
 from ..plate import PlateCircle
@@ -55,10 +58,10 @@ class ParamsBody(BaseModel):
 def _default_batch(root: Path) -> str:
     inputs_root = root / "inputs"
     if not inputs_root.exists():
-        return "default"
+        return time.strftime("session_%Y%m%d_%H%M%S")
     subdirs = [p for p in inputs_root.iterdir() if p.is_dir()]
     if not subdirs:
-        return "default"
+        return time.strftime("session_%Y%m%d_%H%M%S")
     return max(subdirs, key=lambda p: p.stat().st_mtime).name
 
 
@@ -119,7 +122,7 @@ def build_app(root: Path) -> FastAPI:
     (root / "inputs").mkdir(exist_ok=True)
     (root / "runs").mkdir(exist_ok=True)
 
-    app = FastAPI(title="CFU counter")
+    app = FastAPI(title="WeCFU")
 
     # ─── batch / image listing ──────────────────────────────────────────────
 
@@ -167,7 +170,7 @@ def build_app(root: Path) -> FastAPI:
 
     @app.post("/api/ingest")
     def ingest(body: IngestBody):
-        batch = body.batch or time.strftime("upload_%Y%m%d_%H%M%S")
+        batch = body.batch or time.strftime("session_%Y%m%d_%H%M%S")
         dst = root / "inputs" / batch
         dst.mkdir(parents=True, exist_ok=True)
         n = 0
@@ -232,32 +235,12 @@ def build_app(root: Path) -> FastAPI:
         process_image(img_path, run_dir, params=_params_from_body(params), force=True)
         return {"ok": True}
 
-    @app.post("/api/batch/{batch}/image/{name}/sam")
-    def run_sam(batch: str, name: str):
-        from ..sam_refine import sam_segment
-
-        img_path = _image_for(root, batch, name)
-        img = cv2.imdecode(np.fromfile(str(img_path), dtype=np.uint8), cv2.IMREAD_COLOR)
-        state = _load_state(root, batch, name)
-        plate = PlateCircle(**state["plate"])
-        try:
-            dets = sam_segment(img, plate)
-        except RuntimeError as e:
-            raise HTTPException(400, str(e))
-        state["detections"] = [d.asdict() for d in dets]
-        state["method"] = "sam"
-        state["reviewed"] = False
-        _save_state(root, batch, name, state)
-        _rerender(root, batch, name, state)
-        return {"count": len(dets)}
-
     # ─── mask preview (live tuning) ─────────────────────────────────────────
 
     @app.post("/api/batch/{batch}/image/{name}/mask_preview.png")
     def mask_preview(batch: str, name: str, params: ParamsBody):
         img_path = _image_for(root, batch, name)
         img = cv2.imdecode(np.fromfile(str(img_path), dtype=np.uint8), cv2.IMREAD_COLOR)
-        # Reuse the existing plate detection if we already have one — cheaper.
         try:
             state = _load_state(root, batch, name)
             plate = PlateCircle(**state["plate"])
@@ -268,7 +251,6 @@ def build_app(root: Path) -> FastAPI:
         h, w = img.shape[:2]
         plate_mask = plate.mask((h, w), shrink=sp.plate_inset)
         bw = _white_colony_mask(img, plate_mask, sp.min_value, sp.max_saturation)
-        # Tint: green where mask is on, dim the rest. Then crop to plate bbox.
         out = img.copy()
         green = np.zeros_like(out)
         green[..., 1] = 255
@@ -302,7 +284,9 @@ def build_app(root: Path) -> FastAPI:
         state["detections"].append(d.asdict())
         state["reviewed"] = True
         _save_state(root, batch, name, state)
-        _rerender(root, batch, name, state)
+        # NOTE: do NOT rerender the overlay PNG here — that's slow and the live
+        # canvas paints client-side. Server-side overlays are regenerated only
+        # when the user exports a bundle (see /export.zip below).
         return {"id": next_id}
 
     @app.delete("/api/batch/{batch}/image/{name}/detections/{det_id}")
@@ -314,7 +298,6 @@ def build_app(root: Path) -> FastAPI:
             raise HTTPException(404, f"detection {det_id} not found")
         state["reviewed"] = True
         _save_state(root, batch, name, state)
-        _rerender(root, batch, name, state)
         return {"ok": True}
 
     @app.post("/api/batch/{batch}/image/{name}/reviewed")
@@ -339,60 +322,38 @@ def build_app(root: Path) -> FastAPI:
 
     @app.get("/api/batch/{batch}/image/{name}/overlay")
     def serve_overlay(batch: str, name: str):
-        p = _overlay_path(root, batch, name)
-        if not p.exists():
-            raise HTTPException(404, "overlay missing — run first")
-        return FileResponse(p)
+        # Generate on demand so we don't pay the cost on every click.
+        state = _load_state(root, batch, name)
+        op = _overlay_path(root, batch, name)
+        if not op.exists() or op.stat().st_mtime < _det_path(root, batch, name).stat().st_mtime:
+            _rerender(root, batch, name, state)
+        return FileResponse(op)
 
     # ─── export ────────────────────────────────────────────────────────────
 
     def _build_csv(batch: str) -> str:
+        """Slim CSV: only the columns users actually care about."""
         import csv
         in_dir = root / "inputs" / batch
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
-            "filename", "plate", "gram", "medium", "dilution",
-            "atmo", "day", "rep", "timestamp",
-            "cfu_count", "mean_radius_px", "plate_radius_px",
-            "reviewed", "method", "n_manual",
-            "low_confidence", "notes",
+            "filename", "cfu_count", "reviewed", "method",
+            "n_manual", "low_confidence", "notes",
         ])
         for p in sorted(in_dir.iterdir()):
             if p.suffix.lower() not in _IMG_EXTS:
                 continue
             det_p = _det_path(root, batch, p.name)
             state = json.loads(det_p.read_text()) if det_p.exists() else None
-            meta = parse_name(p.name)
             if not state:
-                writer.writerow([
-                    p.name,
-                    meta.plate if meta else "",
-                    meta.gram if meta else "",
-                    meta.medium if meta else "",
-                    meta.dilution if meta else "",
-                    meta.atmo if meta else "",
-                    meta.day if meta else "",
-                    meta.rep if meta else "",
-                    meta.timestamp if meta else "",
-                    "", "", "", False, "", 0, "", "",
-                ])
+                writer.writerow([p.name, "", False, "", 0, "", ""])
                 continue
             dets = state["detections"]
             diag = state.get("diagnostics", {})
             writer.writerow([
                 p.name,
-                meta.plate if meta else "",
-                meta.gram if meta else "",
-                meta.medium if meta else "",
-                meta.dilution if meta else "",
-                meta.atmo if meta else "",
-                meta.day if meta else "",
-                meta.rep if meta else "",
-                meta.timestamp if meta else "",
                 len(dets),
-                diag.get("mean_radius_px", ""),
-                state.get("plate", {}).get("r", ""),
                 state.get("reviewed", False),
                 state.get("method", ""),
                 sum(1 for d in dets if d.get("source") == "manual"),
@@ -402,25 +363,46 @@ def build_app(root: Path) -> FastAPI:
         return buf.getvalue()
 
     @app.get("/api/batch/{batch}/export.csv")
-    def export_csv(batch: str):
+    def export_csv(batch: str, filename: Optional[str] = None):
         in_dir = root / "inputs" / batch
         if not in_dir.exists():
             raise HTTPException(404, "batch not found")
+        fname = filename or f"wecfu_{batch}.csv"
+        if not fname.lower().endswith(".csv"):
+            fname += ".csv"
         return Response(
             content=_build_csv(batch),
             media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="cfu_{batch}.csv"'},
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
     @app.get("/api/batch/{batch}/export.zip")
-    def export_bundle(batch: str):
-        """Bundle CSV + every annotated overlay + per-image JSON in one zip."""
+    def export_bundle(batch: str, filename: Optional[str] = None):
+        """Bundle CSV + every annotated overlay + per-image JSON in one zip.
+
+        Overlays are (re)generated on the fly so the bundle reflects the
+        user's latest edits.
+        """
         in_dir = root / "inputs" / batch
         if not in_dir.exists():
             raise HTTPException(404, "batch not found")
+
+        # Ensure overlays reflect current state.
+        for p in sorted(in_dir.iterdir()):
+            if p.suffix.lower() not in _IMG_EXTS:
+                continue
+            det_p = _det_path(root, batch, p.name)
+            if not det_p.exists():
+                continue
+            state = json.loads(det_p.read_text())
+            op = _overlay_path(root, batch, p.name)
+            if not op.exists() or op.stat().st_mtime < det_p.stat().st_mtime:
+                _rerender(root, batch, p.name, state)
+
         out = io.BytesIO()
+        base = (filename or f"wecfu_{batch}").rstrip(".zip")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(f"cfu_{batch}.csv", _build_csv(batch))
+            zf.writestr(f"{base}.csv", _build_csv(batch))
             ov_dir = root / "runs" / batch / "overlays"
             det_dir = root / "runs" / batch / "detections"
             if ov_dir.exists():
@@ -430,10 +412,13 @@ def build_app(root: Path) -> FastAPI:
                 for p in sorted(det_dir.glob("*.json")):
                     zf.write(p, arcname=f"detections/{p.name}")
         out.seek(0)
+        fname = (filename or f"wecfu_{batch}")
+        if not fname.lower().endswith(".zip"):
+            fname += ".zip"
         return Response(
             content=out.getvalue(),
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="cfu_{batch}.zip"'},
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
     # ─── frontend ──────────────────────────────────────────────────────────

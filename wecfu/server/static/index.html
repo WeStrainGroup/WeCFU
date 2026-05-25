@@ -1,20 +1,19 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>CFU counter</title>
+  <title>WeCFU</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
   <header>
-    <h1>CFU counter</h1>
-    <div id="batch-controls">
-      <label>批次
-        <select id="batch-select"></select>
-      </label>
-      <button id="btn-run">全部计数</button>
-      <button id="btn-export-csv">导出 CSV</button>
-      <button id="btn-export-zip">导出打包 (CSV+图)</button>
+    <h1 data-i18n="appTitle">WeCFU</h1>
+    <div id="top-controls">
+      <button id="btn-run" data-i18n="countAll">Count all</button>
+      <button id="btn-export-csv" data-i18n="exportCSV">Export CSV…</button>
+      <button id="btn-export-zip" data-i18n="exportBundle">Export bundle…</button>
+      <button id="btn-help" data-i18n="helpButton" title="Help">Help</button>
+      <select id="lang-select" title="Language" data-i18n-title="language"></select>
       <span id="status" class="muted"></span>
     </div>
   </header>
@@ -22,10 +21,11 @@
   <main>
     <aside id="sidebar">
       <div id="dropzone">
-        <p>把图片或文件夹拖到这里<br/><span class="muted">（仅建符号链接，原图不动）</span></p>
-        <p class="muted">或粘贴绝对路径：</p>
+        <p><span data-i18n="dropHint">Drop image files or a folder here</span><br/>
+           <span class="muted" data-i18n="dropSubHint">(symlinked — your originals are not modified)</span></p>
+        <p class="muted" data-i18n="pasteHint">Or paste an absolute path:</p>
         <input id="path-input" placeholder="/path/to/plate/photos" />
-        <button id="btn-ingest">导入路径</button>
+        <button id="btn-ingest" data-i18n="ingestBtn">Ingest path</button>
       </div>
       <div id="image-list"></div>
     </aside>
@@ -33,15 +33,14 @@
     <section id="viewer">
       <div id="viewer-header">
         <div>
-          <span id="current-name" class="muted">— 选一张图 —</span>
+          <span id="current-name" class="muted" data-i18n="selectAnImage">— select an image —</span>
           <span id="meta-tag"></span>
         </div>
         <div>
           <span id="count-badge" class="badge">0 CFU</span>
-          <button id="btn-undo" title="撤销 (Cmd/Ctrl-Z)">↶ 撤销</button>
-          <button id="btn-rerun">重新计数</button>
-          <button id="btn-sam" title="对密集板用 SAM 兜底">SAM</button>
-          <button id="btn-mark-reviewed">标记已复核</button>
+          <button id="btn-undo" title="Undo (Cmd/Ctrl-Z)" data-i18n="undo">↶ Undo</button>
+          <button id="btn-rerun" data-i18n="countOne">Re-count</button>
+          <button id="btn-mark-reviewed" data-i18n="markReviewed">Mark reviewed</button>
         </div>
       </div>
 
@@ -50,40 +49,76 @@
       </div>
 
       <div id="legend" class="muted">
-        <span class="dot dot-cv"></span>自动 (CV) ·
-        <span class="dot dot-sam"></span>SAM ·
-        <span class="dot dot-manual"></span>手动 ·
-        <b>左键</b> 空白处加菌落 · <b>右键</b> 圆圈删除 · <b>滚轮</b> 缩放 · <b>Cmd/Ctrl+拖拽</b> 平移 · <b>← →</b> 上/下一张
+        <span class="dot dot-cv"></span><span data-i18n="legendAuto">auto</span> ·
+        <span class="dot dot-manual"></span><span data-i18n="legendManual">manual</span> ·
+        <span data-i18n="legend"></span>
       </div>
 
       <div id="params">
-        <label>预设
+        <label><span data-i18n="presetLabel">Preset</span>
           <select id="preset-select">
-            <option value="white">白菌落（默认）</option>
-            <option value="cream">乳白/淡黄</option>
-            <option value="yellow">黄色菌落</option>
-            <option value="any">任意亮色</option>
-            <option value="custom">自定义</option>
+            <option value="white"  data-i18n="presetWhite">White colonies (default)</option>
+            <option value="cream"  data-i18n="presetCream">Cream / pale yellow</option>
+            <option value="yellow" data-i18n="presetYellow">Yellow colonies</option>
+            <option value="any"    data-i18n="presetAny">Any bright</option>
+            <option value="custom" data-i18n="presetCustom">Custom</option>
           </select>
         </label>
-        <label>新增半径(px) <input type="number" id="p-radius" value="40" min="3" max="300"/></label>
-        <label>min_value <input type="number" id="p-min-value" value="200" min="0" max="255"/></label>
-        <label>max_saturation <input type="number" id="p-max-sat" value="60" min="0" max="255"/></label>
-        <label>plate_inset <input type="number" id="p-inset" value="0.82" step="0.01" min="0.5" max="1.0"/></label>
-        <label>min_circularity <input type="number" id="p-circ" value="0.55" step="0.05" min="0" max="1"/></label>
-        <label>min_area_frac <input type="number" id="p-min-area" value="0.0001" step="0.00005" min="0" max="0.01"/></label>
-        <label>peak_min_dist <input type="number" id="p-peak" value="15" min="2" max="80"/></label>
-        <label><input type="checkbox" id="p-preview"/> 实时阈值预览</label>
-        <button id="btn-apply-params">应用并重跑</button>
+        <label><span data-i18n="paramRadius">New-colony radius (px)</span> <input type="number" id="p-radius" value="40" min="3" max="300"/></label>
+        <label><span data-i18n="paramMinValue">min_value</span> <input type="number" id="p-min-value" value="200" min="0" max="255"/></label>
+        <label><span data-i18n="paramMaxSat">max_saturation</span> <input type="number" id="p-max-sat" value="60" min="0" max="255"/></label>
+        <label><span data-i18n="paramInset">plate_inset</span> <input type="number" id="p-inset" value="0.82" step="0.01" min="0.5" max="1.0"/></label>
+        <label><span data-i18n="paramCirc">min_circularity</span> <input type="number" id="p-circ" value="0.55" step="0.05" min="0" max="1"/></label>
+        <label><span data-i18n="paramArea">min_area_frac</span> <input type="number" id="p-min-area" value="0.0001" step="0.00005" min="0" max="0.01"/></label>
+        <label><span data-i18n="paramPeak">peak_min_distance</span> <input type="number" id="p-peak" value="15" min="2" max="80"/></label>
+        <label><input type="checkbox" id="p-preview"/> <span data-i18n="livePreview">Live threshold preview</span></label>
+        <button id="btn-apply-params" data-i18n="applyParams">Apply & re-count</button>
       </div>
 
       <div id="notes-bar">
-        <label>备注：</label>
-        <input id="notes-input" placeholder="给这一张写一句备注，导出时会写进 CSV" />
+        <label data-i18n="notesLabel">Notes:</label>
+        <input id="notes-input" data-i18n-placeholder="notesPlaceholder" placeholder="Per-image note — stored in CSV"/>
       </div>
     </section>
   </main>
 
+  <!-- Help modal -->
+  <div id="modal-backdrop" hidden>
+    <div id="help-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 data-i18n="helpTitle">WeCFU — quick help</h2>
+        <button id="btn-help-close" data-i18n="helpClose">Close</button>
+      </div>
+      <div id="help-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Export modal -->
+  <div id="export-backdrop" hidden>
+    <div id="export-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 data-i18n="exportTitle">Export</h2>
+        <button id="btn-export-cancel" data-i18n="exportCancel">Cancel</button>
+      </div>
+      <div class="modal-body">
+        <label class="stacked"><span data-i18n="exportFileName">File name</span>
+          <input id="export-filename" />
+        </label>
+        <div id="export-format-row" hidden>
+          <label><input type="radio" name="export-format" value="csv" checked/> <span data-i18n="exportFormatCSV">CSV only (counts)</span></label>
+          <label><input type="radio" name="export-format" value="zip"/> <span data-i18n="exportFormatZip">Bundle (CSV + annotated images + JSON)</span></label>
+        </div>
+        <label class="stacked"><span data-i18n="exportSaveLocation">Save to</span>
+          <button id="export-location-btn" type="button" data-i18n="exportSaveLocationDefault">Downloads (browser default)</button>
+        </label>
+        <div class="modal-actions">
+          <button id="btn-export-confirm" class="primary" data-i18n="exportConfirm">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/i18n.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
