@@ -59,6 +59,11 @@ button.primary:hover { background: #36996c; }
 select { background: #0f1115; color: #e4e6eb; border: 1px solid #333; border-radius: 4px; padding: 4px 8px; }
 
 /* ── modal ───────────────────────────────────────────────────────────── */
+/* IMPORTANT: the HTML `hidden` attribute would normally hide these, but
+   `display: flex` below would override it. Force `[hidden]` to take
+   precedence so the modals are actually hidden on page load. */
+[hidden] { display: none !important; }
+
 #modal-backdrop, #export-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.55);
   z-index: 100; display: flex; align-items: center; justify-content: center;
