@@ -7,7 +7,13 @@
 //   data-i18n="key"            → element.textContent
 //   data-i18n-placeholder="..."→ element.placeholder
 //   data-i18n-title="..."      → element.title
+//
+// Wrapped in an IIFE so identifiers (t, setLang, applyI18n, ...) do NOT
+// leak to the global scope — otherwise they would clash with the same
+// names destructured from window.WECFU_I18N in app.js (classic scripts
+// share a single script-scope and `function name(){}` becomes a global).
 
+(function () {
 const I18N = {
   en: {
     appTitle: 'WeCFU',
@@ -421,3 +427,4 @@ function applyI18n(root = document) {
 }
 
 window.WECFU_I18N = { setLang, getLang, t, applyI18n, LANG_NAMES, I18N };
+})();
