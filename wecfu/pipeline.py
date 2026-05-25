@@ -18,7 +18,6 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from .naming import parse as parse_name
 from .overlay import render
 from .plate import PlateCircle, detect_plate
 from .segment import Detection, SegmentParams, segment
@@ -84,24 +83,11 @@ def process_image(
     overlay_img = render(img_bgr, dets, plate)
     cv2.imwrite(str(overlay_path), overlay_img)
 
-    meta = parse_name(img_path.name)
     row = {
         "filename": img_path.name,
-        "plate": meta.plate if meta else "",
-        "gram": meta.gram if meta else "",
-        "medium": meta.medium if meta else "",
-        "dilution": meta.dilution if meta else "",
-        "atmo": meta.atmo if meta else "",
-        "day": meta.day if meta else "",
-        "rep": meta.rep if meta else "",
-        "timestamp": meta.timestamp if meta else "",
         "cfu_count": len(dets),
-        "mean_radius_px": diagnostics.get("mean_radius_px", 0.0),
-        "plate_radius_px": plate.r,
-        "low_confidence": diagnostics.get("low_confidence", False),
-        "reviewed": False if existing is None else existing.get("reviewed", False),
-        "method": method,
         "n_manual": sum(1 for d in dets if d.source == "manual"),
+        "low_confidence": diagnostics.get("low_confidence", False),
         "notes": existing.get("notes", "") if existing else "",
     }
     return row

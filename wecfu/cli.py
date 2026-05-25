@@ -52,20 +52,6 @@ def _cmd_serve(args) -> int:
     return 0
 
 
-def _cmd_sam(args) -> int:
-    import cv2
-    import numpy as np
-
-    from .plate import detect_plate
-    from .sam_refine import sam_segment
-
-    img = cv2.imdecode(np.fromfile(args.image, dtype=np.uint8), cv2.IMREAD_COLOR)
-    plate = detect_plate(img)
-    dets = sam_segment(img, plate)
-    print(f"SAM detections: {len(dets)}")
-    return 0
-
-
 def main() -> int:
     p = argparse.ArgumentParser(prog="wecfu")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -87,10 +73,6 @@ def main() -> int:
     ps.add_argument("--port", type=int, default=8765)
     ps.add_argument("--no-open", dest="open", action="store_false")
     ps.set_defaults(func=_cmd_serve, open=True)
-
-    psam = sub.add_parser("sam", help="single-image SAM run (debug)")
-    psam.add_argument("image")
-    psam.set_defaults(func=_cmd_sam)
 
     args = p.parse_args()
     return args.func(args)

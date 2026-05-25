@@ -118,6 +118,15 @@ def _params_from_body(body: Optional[ParamsBody]) -> SegmentParams:
 
 
 def build_app(root: Path) -> FastAPI:
+    # Fresh workspace on every server start — discard any leftover session
+    # batches from a previous run. Symlinks ARE removed (the targets they
+    # point to are not touched). Real images uploaded via drag-drop are
+    # ALSO discarded, so the user always starts clean.
+    if root.exists():
+        for sub in ("inputs", "runs"):
+            d = root / sub
+            if d.exists():
+                shutil.rmtree(d)
     root.mkdir(parents=True, exist_ok=True)
     (root / "inputs").mkdir(exist_ok=True)
     (root / "runs").mkdir(exist_ok=True)
@@ -338,7 +347,7 @@ def build_app(root: Path) -> FastAPI:
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
-            "filename", "cfu_count", "reviewed", "method",
+            "filename", "cfu_count",
             "n_manual", "low_confidence", "notes",
         ])
         for p in sorted(in_dir.iterdir()):
@@ -347,15 +356,13 @@ def build_app(root: Path) -> FastAPI:
             det_p = _det_path(root, batch, p.name)
             state = json.loads(det_p.read_text()) if det_p.exists() else None
             if not state:
-                writer.writerow([p.name, "", False, "", 0, "", ""])
+                writer.writerow([p.name, "", 0, "", ""])
                 continue
             dets = state["detections"]
             diag = state.get("diagnostics", {})
             writer.writerow([
                 p.name,
                 len(dets),
-                state.get("reviewed", False),
-                state.get("method", ""),
                 sum(1 for d in dets if d.get("source") == "manual"),
                 diag.get("low_confidence", False),
                 state.get("notes", ""),

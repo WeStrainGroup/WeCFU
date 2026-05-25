@@ -132,10 +132,21 @@ async function selectImage(name) {
   state.imageName = name;
   state.history = [];
   state.view.ready = false; // force one-time refit when the image changes
+  state.maskPreview = null; // clear any live-threshold preview from the previous image
   $('current-name').textContent = name;
   renderImageList();
   await loadDetections({ refit: true });
   $('notes-input').value = state.imageList.find(i => i.name === name)?.notes || '';
+  // Opening an image auto-marks it as reviewed (green dot in the sidebar).
+  // The button has been removed in v0.1.5 — review = "you have looked at this".
+  if (state.batch) {
+    fetch(imgURL('/reviewed?reviewed=true'), { method: 'POST' }).catch(() => {});
+    const row = state.imageList.find(i => i.name === name);
+    if (row && !row.reviewed) { row.reviewed = true; renderImageList(); }
+  }
+  // If the live-preview toggle is on, re-fetch for the new image (with the
+  // currently-set thresholds) instead of showing the stale previous preview.
+  if ($('p-preview').checked) refreshMaskPreview();
 }
 
 async function loadDetections({ refit = false } = {}) {
@@ -154,9 +165,8 @@ async function loadDetections({ refit = false } = {}) {
   state.detections = data.detections;
   state.plate = data.plate;
   updateCountBadge();
-  const lc = data.diagnostics?.low_confidence ? ` · ${t('metaLowConf')}` : '';
-  const rv = data.reviewed ? ` · ${t('metaReviewed')}` : '';
-  $('meta-tag').textContent = `· ${data.method || 'cv'}${rv}${lc}`;
+  const lc = data.diagnostics?.low_confidence ? `· ${t('metaLowConf')}` : '';
+  $('meta-tag').textContent = lc;
   await loadRawImage();
   if (refit || !state.view.ready) { fitToCanvas(); state.view.ready = true; }
   draw();
@@ -596,12 +606,6 @@ function wireUpHandlers() {
     await loadDetections(); loadImages();
   });
 
-  $('btn-mark-reviewed').addEventListener('click', async () => {
-    if (!state.batch || !state.imageName) return;
-    await fetch(imgURL('/reviewed?reviewed=true'), { method: 'POST' });
-    loadImages();
-  });
-
   $('btn-apply-params').addEventListener('click', () => $('btn-rerun').click());
 
   $('btn-export-csv').addEventListener('click', () => state.batch && openExportModal('csv'));
@@ -654,10 +658,6 @@ function wireUpHandlers() {
     if (e.key === 'Escape') { closeHelp(); $('export-backdrop').hidden = true; return; }
     if (e.key === 'ArrowRight' || e.key === 'j') moveSelection(1);
     else if (e.key === 'ArrowLeft' || e.key === 'k') moveSelection(-1);
-    else if (e.key === ' ') {
-      e.preventDefault();
-      if (state.batch && state.imageName) $('btn-mark-reviewed').click();
-    }
   });
 
   const dz = $('dropzone');
