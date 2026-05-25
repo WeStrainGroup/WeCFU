@@ -63,16 +63,43 @@ function imgURL(suffix) { return `/api/batch/${enc(state.batch)}/image/${enc(sta
 // ── batches + image list ─────────────────────────────────────────────────
 
 async function loadDefaultBatch() {
-  const r = await fetch('/api/batches').then(r => r.json());
-  state.batch = r.default;
-  if (r.batches.length && !r.batches.includes(state.batch)) state.batch = r.batches[0];
-  await loadImages();
+  try {
+    const r = await fetch('/api/batches').then(r => r.json());
+    if (r.batches && r.batches.length) {
+      state.batch = r.batches.includes(r.default) ? r.default : r.batches[0];
+      await loadImages();
+    } else {
+      // No batches yet — fresh install. Wait for the user to ingest.
+      state.batch = null;
+      state.imageList = [];
+      renderImageList();
+    }
+  } catch (e) {
+    console.warn('loadDefaultBatch failed (will retry after ingest):', e);
+    state.batch = null;
+    state.imageList = [];
+  }
 }
 
 async function loadImages() {
-  if (!state.batch) return;
-  const r = await fetch(`/api/batch/${enc(state.batch)}/images`).then(r => r.json());
-  state.imageList = r.images;
+  if (!state.batch) {
+    state.imageList = [];
+    renderImageList();
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/batch/${enc(state.batch)}/images`);
+    if (!resp.ok) {
+      state.imageList = [];
+      renderImageList();
+      return;
+    }
+    const r = await resp.json();
+    state.imageList = Array.isArray(r.images) ? r.images : [];
+  } catch (e) {
+    console.warn('loadImages failed:', e);
+    state.imageList = [];
+  }
   renderImageList();
 }
 
@@ -540,11 +567,7 @@ function populateLangSelect() {
 
 // ── wiring ──────────────────────────────────────────────────────────────
 
-window.addEventListener('DOMContentLoaded', async () => {
-  applyI18n();
-  populateLangSelect();
-  await loadDefaultBatch();
-
+function wireUpHandlers() {
   $('btn-ingest').addEventListener('click', async () => {
     const p = $('path-input').value.trim();
     if (p) await ingestPath(p);
@@ -652,4 +675,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     if (files.length) await uploadFiles(files);
   });
+}
+
+// Bootstrap: wire up handlers FIRST so buttons work even if the initial
+// data fetch fails (e.g. fresh install with no batches yet). Then load.
+window.addEventListener('DOMContentLoaded', async () => {
+  try { applyI18n(); } catch (e) { console.warn('applyI18n failed:', e); }
+  try { populateLangSelect(); } catch (e) { console.warn('populateLangSelect failed:', e); }
+  try { wireUpHandlers(); } catch (e) { console.error('wireUpHandlers failed:', e); }
+  try { await loadDefaultBatch(); } catch (e) { console.warn('loadDefaultBatch failed:', e); }
 });
