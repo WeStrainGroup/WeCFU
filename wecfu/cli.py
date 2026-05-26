@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
 import webbrowser
 from pathlib import Path
@@ -37,18 +39,48 @@ def _cmd_batch(args) -> int:
 
 
 def _cmd_serve(args) -> int:
+    """Single-user local GUI."""
     import uvicorn
 
     from .server.app import build_app
 
     root = Path(args.root).expanduser().resolve()
+    # Fresh workspace on every server start.
+    if root.exists():
+        for sub in ("inputs", "runs"):
+            d = root / sub
+            if d.exists():
+                shutil.rmtree(d)
     root.mkdir(parents=True, exist_ok=True)
-    app = build_app(root)
+    (root / "inputs").mkdir(exist_ok=True)
+    (root / "runs").mkdir(exist_ok=True)
+
+    app = build_app(get_root=lambda: root, web_mode=False)
     url = f"http://127.0.0.1:{args.port}"
     if args.open:
         webbrowser.open(url)
     print(f"wecfu serving at {url}  (workspace: {root})")
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
+    return 0
+
+
+def _cmd_web(args) -> int:
+    """Multi-visitor web mode (Hugging Face Spaces and similar)."""
+    import uvicorn
+
+    from .server.web import build_web_app
+
+    sessions_root = Path(
+        args.sessions_root
+        or os.environ.get("WECFU_SESSIONS_ROOT", "/tmp/wecfu_sessions")
+    ).expanduser().resolve()
+
+    app = build_web_app(sessions_root)
+    print(
+        f"wecfu (web mode) serving at http://{args.host}:{args.port}  "
+        f"(sessions: {sessions_root})"
+    )
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
 
@@ -64,7 +96,7 @@ def main() -> int:
     )
     pb.set_defaults(func=_cmd_batch)
 
-    ps = sub.add_parser("serve", help="launch the local web GUI")
+    ps = sub.add_parser("serve", help="launch the single-user local web GUI")
     ps.add_argument(
         "--root",
         default="./data",
@@ -73,6 +105,22 @@ def main() -> int:
     ps.add_argument("--port", type=int, default=8765)
     ps.add_argument("--no-open", dest="open", action="store_false")
     ps.set_defaults(func=_cmd_serve, open=True)
+
+    pw = sub.add_parser(
+        "web",
+        help="multi-visitor web mode with per-session isolation (for deployment)",
+    )
+    pw.add_argument(
+        "--sessions-root",
+        default=None,
+        help="root dir for per-session workspaces "
+             "(default: $WECFU_SESSIONS_ROOT or /tmp/wecfu_sessions)",
+    )
+    pw.add_argument("--host", default="0.0.0.0",
+                    help="bind host (default: 0.0.0.0 — for containers)")
+    pw.add_argument("--port", type=int, default=7860,
+                    help="bind port (default: 7860 — Hugging Face Spaces convention)")
+    pw.set_defaults(func=_cmd_web)
 
     args = p.parse_args()
     return args.func(args)

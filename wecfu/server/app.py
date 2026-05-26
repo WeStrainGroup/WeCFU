@@ -1,8 +1,12 @@
 """FastAPI backend for the WeCFU GUI.
 
-v0.1.1: simplified surface — no SAM endpoint exposed; slim CSV; export
-accepts a custom filename. The "batch" concept still exists internally
-for storage organisation but is auto-managed and not surfaced in the UI.
+`build_app` accepts a `get_root` callable that returns the workspace directory
+for the *current request*. In single-user local mode (CLI) this is a constant.
+In web mode (multi-visitor HF Space) it resolves to a per-session directory
+via a cookie-driven middleware (see `wecfu.server.web`).
+
+The "batch" concept still exists internally for storage organisation but is
+auto-managed and not surfaced in the UI.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ import shutil
 import time
 import zipfile
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import cv2
 import numpy as np
@@ -29,6 +33,10 @@ from ..segment import Detection, SegmentParams, _white_colony_mask
 
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 _STATIC = Path(__file__).parent / "static"
+
+# Web-mode upload limits (per request body & per session). Ignored in local mode.
+WEB_MAX_BYTES = 200 * 1024 * 1024   # 200 MB per upload request
+WEB_MAX_IMAGES = 50                 # cap on images per session
 
 
 class IngestBody(BaseModel):
@@ -117,26 +125,47 @@ def _params_from_body(body: Optional[ParamsBody]) -> SegmentParams:
     )
 
 
-def build_app(root: Path) -> FastAPI:
-    # Fresh workspace on every server start — discard any leftover session
-    # batches from a previous run. Symlinks ARE removed (the targets they
-    # point to are not touched). Real images uploaded via drag-drop are
-    # ALSO discarded, so the user always starts clean.
-    if root.exists():
-        for sub in ("inputs", "runs"):
-            d = root / sub
-            if d.exists():
-                shutil.rmtree(d)
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "inputs").mkdir(exist_ok=True)
-    (root / "runs").mkdir(exist_ok=True)
+def _count_images(root: Path) -> int:
+    """How many images are currently stored under this workspace (across all batches)."""
+    inputs = root / "inputs"
+    if not inputs.exists():
+        return 0
+    total = 0
+    for batch_dir in inputs.iterdir():
+        if not batch_dir.is_dir():
+            continue
+        total += sum(1 for f in batch_dir.iterdir()
+                     if f.is_file() and f.suffix.lower() in _IMG_EXTS)
+    return total
 
+
+def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
+    """Build the FastAPI app.
+
+    Args:
+      get_root: zero-arg callable returning the workspace `Path` for the
+        current request. In local mode this is `lambda: fixed_path`. In web
+        mode the session middleware sets a contextvar and `get_root` reads
+        it (so each request gets its own per-visitor workspace).
+      web_mode: enables upload size caps and disables filesystem ingest
+        (the /api/ingest endpoint would have no meaning on a server with
+        no access to the visitor's filesystem).
+    """
     app = FastAPI(title="WeCFU")
 
-    # ─── batch / image listing ──────────────────────────────────────────────
+    @app.get("/api/config")
+    def get_config():
+        """Frontend feature flags."""
+        return {
+            "web_mode": web_mode,
+            "max_images": WEB_MAX_IMAGES if web_mode else None,
+            "max_bytes": WEB_MAX_BYTES if web_mode else None,
+        }
 
     @app.get("/api/batches")
     def list_batches():
+        root = get_root()
+        (root / "inputs").mkdir(parents=True, exist_ok=True)
         return {
             "batches": sorted(p.name for p in (root / "inputs").iterdir() if p.is_dir()),
             "default": _default_batch(root),
@@ -144,6 +173,7 @@ def build_app(root: Path) -> FastAPI:
 
     @app.get("/api/batch/{batch}/images")
     def list_images(batch: str):
+        root = get_root()
         in_dir = root / "inputs" / batch
         if not in_dir.exists():
             raise HTTPException(404, "batch not found")
@@ -169,10 +199,15 @@ def build_app(root: Path) -> FastAPI:
             })
         return {"images": items}
 
-    # ─── ingest ────────────────────────────────────────────────────────────
+    # ─── ingest (local mode only) ──────────────────────────────────────────
 
     @app.post("/api/ingest")
     def ingest(body: IngestBody):
+        if web_mode:
+            raise HTTPException(
+                403, "Path ingest is disabled in web mode — drag-drop files instead."
+            )
+        root = get_root()
         batch = body.batch or time.strftime("session_%Y%m%d_%H%M%S")
         dst = root / "inputs" / batch
         dst.mkdir(parents=True, exist_ok=True)
@@ -197,15 +232,36 @@ def build_app(root: Path) -> FastAPI:
 
     @app.post("/api/upload")
     async def upload(batch: str = Form(...), files: list[UploadFile] = File(...)):
+        root = get_root()
+        if web_mode:
+            existing = _count_images(root)
+            if existing + len(files) > WEB_MAX_IMAGES:
+                raise HTTPException(
+                    413,
+                    f"Per-session limit is {WEB_MAX_IMAGES} images "
+                    f"(you have {existing}, tried to add {len(files)}).",
+                )
         dst = root / "inputs" / batch
         dst.mkdir(parents=True, exist_ok=True)
         n = 0
+        running_bytes = 0
         for f in files:
             if Path(f.filename).suffix.lower() not in _IMG_EXTS:
                 continue
             out = dst / Path(f.filename).name
             with out.open("wb") as fh:
-                shutil.copyfileobj(f.file, fh)
+                while True:
+                    chunk = await f.read(1 << 20)  # 1 MB
+                    if not chunk:
+                        break
+                    running_bytes += len(chunk)
+                    if web_mode and running_bytes > WEB_MAX_BYTES:
+                        fh.close()
+                        out.unlink(missing_ok=True)
+                        raise HTTPException(
+                            413, f"Upload exceeds {WEB_MAX_BYTES // 1024 // 1024} MB cap."
+                        )
+                    fh.write(chunk)
             n += 1
         return {"batch": batch, "uploaded": n}
 
@@ -213,6 +269,7 @@ def build_app(root: Path) -> FastAPI:
 
     @app.post("/api/batch/{batch}/run")
     def run_batch(batch: str, params: Optional[ParamsBody] = None, force: bool = False):
+        root = get_root()
         in_dir = root / "inputs" / batch
         if not in_dir.exists():
             raise HTTPException(404, "batch not found")
@@ -232,16 +289,16 @@ def build_app(root: Path) -> FastAPI:
 
     @app.post("/api/batch/{batch}/image/{name}/run")
     def run_one(batch: str, name: str, params: Optional[ParamsBody] = None):
+        root = get_root()
         img_path = _image_for(root, batch, name)
         run_dir = root / "runs" / batch
         run_dir.mkdir(parents=True, exist_ok=True)
         process_image(img_path, run_dir, params=_params_from_body(params), force=True)
         return {"ok": True}
 
-    # ─── mask preview (live tuning) ─────────────────────────────────────────
-
     @app.post("/api/batch/{batch}/image/{name}/mask_preview.png")
     def mask_preview(batch: str, name: str, params: ParamsBody):
+        root = get_root()
         img_path = _image_for(root, batch, name)
         img = cv2.imdecode(np.fromfile(str(img_path), dtype=np.uint8), cv2.IMREAD_COLOR)
         try:
@@ -269,10 +326,11 @@ def build_app(root: Path) -> FastAPI:
 
     @app.get("/api/batch/{batch}/image/{name}/detections")
     def get_state(batch: str, name: str):
-        return _load_state(root, batch, name)
+        return _load_state(get_root(), batch, name)
 
     @app.post("/api/batch/{batch}/image/{name}/detections")
     def add_det(batch: str, name: str, body: AddDetectionBody):
+        root = get_root()
         state = _load_state(root, batch, name)
         next_id = (max((d["id"] for d in state["detections"]), default=0) + 1)
         d = Detection(
@@ -287,13 +345,11 @@ def build_app(root: Path) -> FastAPI:
         state["detections"].append(d.asdict())
         state["reviewed"] = True
         _save_state(root, batch, name, state)
-        # NOTE: do NOT rerender the overlay PNG here — that's slow and the live
-        # canvas paints client-side. Server-side overlays are regenerated only
-        # when the user exports a bundle (see /export.zip below).
         return {"id": next_id}
 
     @app.delete("/api/batch/{batch}/image/{name}/detections/{det_id}")
     def delete_det(batch: str, name: str, det_id: int):
+        root = get_root()
         state = _load_state(root, batch, name)
         before = len(state["detections"])
         state["detections"] = [d for d in state["detections"] if d["id"] != det_id]
@@ -305,6 +361,7 @@ def build_app(root: Path) -> FastAPI:
 
     @app.post("/api/batch/{batch}/image/{name}/reviewed")
     def mark_reviewed(batch: str, name: str, reviewed: bool = True):
+        root = get_root()
         state = _load_state(root, batch, name)
         state["reviewed"] = reviewed
         _save_state(root, batch, name, state)
@@ -312,6 +369,7 @@ def build_app(root: Path) -> FastAPI:
 
     @app.put("/api/batch/{batch}/image/{name}/notes")
     def set_notes(batch: str, name: str, body: NotesBody):
+        root = get_root()
         state = _load_state(root, batch, name)
         state["notes"] = body.notes
         _save_state(root, batch, name, state)
@@ -321,11 +379,11 @@ def build_app(root: Path) -> FastAPI:
 
     @app.get("/api/batch/{batch}/image/{name}/raw")
     def serve_raw(batch: str, name: str):
-        return FileResponse(_image_for(root, batch, name))
+        return FileResponse(_image_for(get_root(), batch, name))
 
     @app.get("/api/batch/{batch}/image/{name}/overlay")
     def serve_overlay(batch: str, name: str):
-        # Generate on demand so we don't pay the cost on every click.
+        root = get_root()
         state = _load_state(root, batch, name)
         op = _overlay_path(root, batch, name)
         if not op.exists() or op.stat().st_mtime < _det_path(root, batch, name).stat().st_mtime:
@@ -334,7 +392,7 @@ def build_app(root: Path) -> FastAPI:
 
     # ─── export ────────────────────────────────────────────────────────────
 
-    def _build_csv(batch: str) -> str:
+    def _build_csv(root: Path, batch: str) -> str:
         """Slim CSV: only the columns users actually care about."""
         import csv
         in_dir = root / "inputs" / batch
@@ -342,10 +400,10 @@ def build_app(root: Path) -> FastAPI:
         writer = csv.writer(buf)
         writer.writerow([
             "filename",
-            "total_count",      # final number after all human edits
-            "machine_count",    # algorithm's original count, immutable
-            "n_removed",        # machine detections the user deleted
-            "n_added",          # manual detections the user added
+            "total_count",
+            "machine_count",
+            "n_removed",
+            "n_added",
             "notes",
         ])
         for p in sorted(in_dir.iterdir()):
@@ -372,6 +430,7 @@ def build_app(root: Path) -> FastAPI:
 
     @app.get("/api/batch/{batch}/export.csv")
     def export_csv(batch: str, filename: Optional[str] = None):
+        root = get_root()
         in_dir = root / "inputs" / batch
         if not in_dir.exists():
             raise HTTPException(404, "batch not found")
@@ -379,23 +438,17 @@ def build_app(root: Path) -> FastAPI:
         if not fname.lower().endswith(".csv"):
             fname += ".csv"
         return Response(
-            content=_build_csv(batch),
+            content=_build_csv(root, batch),
             media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
     @app.get("/api/batch/{batch}/export.zip")
     def export_bundle(batch: str, filename: Optional[str] = None):
-        """Bundle CSV + every annotated overlay + per-image JSON in one zip.
-
-        Overlays are (re)generated on the fly so the bundle reflects the
-        user's latest edits.
-        """
+        root = get_root()
         in_dir = root / "inputs" / batch
         if not in_dir.exists():
             raise HTTPException(404, "batch not found")
-
-        # Ensure overlays reflect current state.
         for p in sorted(in_dir.iterdir()):
             if p.suffix.lower() not in _IMG_EXTS:
                 continue
@@ -406,11 +459,10 @@ def build_app(root: Path) -> FastAPI:
             op = _overlay_path(root, batch, p.name)
             if not op.exists() or op.stat().st_mtime < det_p.stat().st_mtime:
                 _rerender(root, batch, p.name, state)
-
         out = io.BytesIO()
         base = (filename or f"wecfu_{batch}").rstrip(".zip")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(f"{base}.csv", _build_csv(batch))
+            zf.writestr(f"{base}.csv", _build_csv(root, batch))
             ov_dir = root / "runs" / batch / "overlays"
             det_dir = root / "runs" / batch / "detections"
             if ov_dir.exists():

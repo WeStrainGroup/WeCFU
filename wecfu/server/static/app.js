@@ -679,11 +679,29 @@ function wireUpHandlers() {
   });
 }
 
+async function applyServerConfig() {
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    state.config = cfg;
+    if (cfg.web_mode) {
+      // No filesystem on a shared server — hide the path-ingest UI bits.
+      const hide = (id) => { const el = $(id); if (el) el.style.display = 'none'; };
+      hide('path-input');
+      hide('btn-ingest');
+      const pasteHint = document.querySelector('[data-i18n="pasteHint"]');
+      if (pasteHint) pasteHint.style.display = 'none';
+    }
+  } catch (e) {
+    console.warn('config fetch failed:', e);
+  }
+}
+
 // Bootstrap: wire up handlers FIRST so buttons work even if the initial
 // data fetch fails (e.g. fresh install with no batches yet). Then load.
 window.addEventListener('DOMContentLoaded', async () => {
   try { applyI18n(); } catch (e) { console.warn('applyI18n failed:', e); }
   try { populateLangSelect(); } catch (e) { console.warn('populateLangSelect failed:', e); }
   try { wireUpHandlers(); } catch (e) { console.error('wireUpHandlers failed:', e); }
+  try { await applyServerConfig(); } catch (e) { console.warn('applyServerConfig failed:', e); }
   try { await loadDefaultBatch(); } catch (e) { console.warn('loadDefaultBatch failed:', e); }
 });
