@@ -76,12 +76,18 @@ class SessionMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         if is_new:
-            # HttpOnly so JS can't steal it; SameSite=Lax keeps it usable
-            # for direct navigation from external sites.
+            # HF Spaces embeds the app in a cross-origin iframe inside
+            # huggingface.co. Browsers treat that as a third-party context
+            # and silently drop cookies with SameSite=Lax — which would make
+            # every request look like a new visitor (and uploads disappear
+            # because the follow-up /api/batches fetch lands in a different
+            # session dir than the upload itself).
+            # SameSite=None + Secure is the only combo that works in
+            # cross-site iframes (and it needs HTTPS, which HF terminates).
             response.set_cookie(
                 SESSION_COOKIE, token,
                 max_age=SESSION_TTL_SECONDS,
-                httponly=True, samesite="lax", secure=False,  # HF terminates TLS
+                httponly=True, samesite="none", secure=True,
             )
         return response
 
