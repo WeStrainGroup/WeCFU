@@ -1,6 +1,15 @@
 # 安装指南（给协作者）
 
-## 方式 0 — 一行 conda install（推荐）
+## 方式 −1 — 不装任何东西，浏览器直接用（最快）
+
+打开 **https://huggingface.co/spaces/WeCFU/wecfu**，把图片拖进去就行。
+
+适合临时计数 / 偶尔用一次。单次会话上限 **50 张图 / 200 MB**，1 小时不动会自动清空。
+长期使用、大批量、或想要完全离线 → 用下面的本地安装方式。
+
+---
+
+## 方式 0 — 一行 conda install（本地长期使用推荐）
 
 ```bash
 conda create -n wecfu -c westraingroup -c conda-forge wecfu -y

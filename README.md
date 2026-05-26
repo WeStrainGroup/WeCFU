@@ -1,13 +1,16 @@
 # WeCFU
 
-Local, macOS-friendly **CFU (colony-forming unit) counter** for culturomics
+Friendly, browser-based **CFU (colony-forming unit) counter** for culturomics
 plate photos. Drag a folder of plate images into a browser window, get
 auto-counted plates with each colony numbered, then click-review (add / delete)
 and export a CSV ready for downstream analysis.
 
-Designed to be small, dependency-light, and reproducible — not a black box.
-Built for the WeF culturomics dataset but applies to any standard top-down
-glass-petri photo with light colonies on a darker agar.
+**🦠 Try it instantly — no install:** https://huggingface.co/spaces/WeCFU/wecfu
+
+For long-term / offline / large-batch use, install locally — see
+[INSTALL.md](INSTALL.md). Built for the WeF culturomics dataset but applies
+to any standard top-down glass-petri photo with light colonies on a darker
+agar. Small, dependency-light, reproducible — not a black box.
 
 ## Quickstart
 

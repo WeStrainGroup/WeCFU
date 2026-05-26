@@ -1,5 +1,30 @@
 # 把 WeCFU 同步给协作者
 
+## ✅ 已发布：Hugging Face Space（最简单，浏览器直接用）
+
+**https://huggingface.co/spaces/WeCFU/wecfu**
+
+发给协作者一行话即可：
+
+> WeCFU 网页版上线了，浏览器打开直接用，无需安装：
+> https://huggingface.co/spaces/WeCFU/wecfu
+> 把图片拖进去就行。每次会话上限 50 张 / 200 MB，1 小时不动会自动清空。
+> 想要无限制、本地长期用 → 见 INSTALL.md 的 conda 方式。
+
+下次发新版本同步到 Space：
+```bash
+cd ~/claude_code_workspace/WeF/WeCFU
+# 改完代码并 git commit 到 main 后：
+git checkout hf-deploy
+git merge main -X theirs    # 把 main 最新代码合进 hf-deploy；冲突用 main 的
+cp README_HF.md README.md   # 保持 frontmatter
+git add README.md && git commit -q -m "sync from main"
+git push hf hf-deploy:main
+git checkout main
+```
+
+---
+
 ## ✅ 已发布：WeStrainGroup anaconda channel
 
 `wecfu` 0.1.0 已 push 到 https://anaconda.org/WeStrainGroup/wecfu 。
