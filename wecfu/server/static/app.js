@@ -136,14 +136,35 @@ async function selectImage(name) {
   state.maskPreview = null; // clear any live-threshold preview from the previous image
   $('current-name').textContent = name;
   renderImageList();
+
+  // If this image hasn't been processed yet, run Layer 1 once before
+  // loading detections. Without this, the canvas shows the raw photo with
+  // no plate circle, and any left-click to add a manual colony fails on
+  // the server (no state JSON exists yet) — the user sees "undefined"
+  // labels and the CSV row is blank. This makes the "drop → click → count"
+  // flow Just Work without an explicit "Count all" step for a single image.
+  const row = state.imageList.find(i => i.name === name);
+  if (row && !row.processed) {
+    setStatus(t('statusProcessing'));
+    try {
+      await fetch(imgURL('/run'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(paramsBody()),
+      });
+      if (row) row.processed = true;
+    } catch (e) { console.warn('auto-run failed:', e); }
+    setStatus('');
+  }
+
   await loadDetections({ refit: true });
   $('notes-input').value = state.imageList.find(i => i.name === name)?.notes || '';
   // Opening an image auto-marks it as reviewed (green dot in the sidebar).
   // The button has been removed in v0.1.5 — review = "you have looked at this".
   if (state.batch) {
     fetch(imgURL('/reviewed?reviewed=true'), { method: 'POST' }).catch(() => {});
-    const row = state.imageList.find(i => i.name === name);
-    if (row && !row.reviewed) { row.reviewed = true; renderImageList(); }
+    const r2 = state.imageList.find(i => i.name === name);
+    if (r2 && !r2.reviewed) { r2.reviewed = true; renderImageList(); }
   }
   // If the live-preview toggle is on, re-fetch for the new image (with the
   // currently-set thresholds) instead of showing the stale previous preview.
@@ -312,14 +333,17 @@ async function onClickCanvas(evt) {
   if (evt.metaKey || evt.ctrlKey) return;
   if (!state.batch || !state.imageName || !state.img) return;
 
+  // No server-side state yet → can't add. This shouldn't happen in normal
+  // use because selectImage auto-runs Layer 1, but guard anyway: silently
+  // ignore so we never write a detection with id === undefined.
+  if (!state.plate) return;
+
   const rect = $('canvas').getBoundingClientRect();
   const sx = evt.clientX - rect.left, sy = evt.clientY - rect.top;
   const [ix, iy] = screenToImg(sx, sy);
 
-  if (state.plate) {
-    const dx = ix - state.plate.cx, dy = iy - state.plate.cy;
-    if (dx * dx + dy * dy > state.plate.r * state.plate.r) return;
-  }
+  const dx = ix - state.plate.cx, dy = iy - state.plate.cy;
+  if (dx * dx + dy * dy > state.plate.r * state.plate.r) return;
   if (findHit(ix, iy)) return; // left click on existing circle = no-op
 
   // Optimistic add: paint immediately, sync to server in background.
@@ -334,15 +358,32 @@ async function onClickCanvas(evt) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ cx: ix, cy: iy, r }),
-  }).then(r => r.json()).then(resp => {
+  }).then(async resp => {
+    if (!resp.ok) {
+      // Server refused — roll back the optimistic add so the user
+      // doesn't see a phantom circle labelled "undefined".
+      state.detections = state.detections.filter(x => x.id !== tempId);
+      state.history = state.history.filter(h => !(h.kind === 'add' && h.tempId === tempId));
+      draw();
+      return;
+    }
+    const body = await resp.json();
+    if (typeof body.id !== 'number') {
+      state.detections = state.detections.filter(x => x.id !== tempId);
+      draw();
+      return;
+    }
     const d = state.detections.find(x => x.id === tempId);
-    if (d) d.id = resp.id;
-    // history entry: replace tempId with real id
+    if (d) d.id = body.id;
     const h = state.history.find(h => h.kind === 'add' && h.tempId === tempId);
-    if (h) h.id = resp.id;
+    if (h) h.id = body.id;
     draw();
     debouncedImageListRefresh();
-  }).catch(() => { /* swallow; UI is optimistic */ });
+  }).catch(() => {
+    // Network error → roll back
+    state.detections = state.detections.filter(x => x.id !== tempId);
+    draw();
+  });
 }
 
 async function onContextMenu(evt) {
