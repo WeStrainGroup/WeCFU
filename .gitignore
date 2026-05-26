@@ -6,16 +6,16 @@ __pycache__/
 build/
 *.so
 
-# distribution artifacts: tracked separately, see dist/.gitkeep
-# (uncomment the next line if you don't want to ship pre-built wheels)
-# dist/
+# pip / setuptools build outputs — re-built on demand, shipped via
+# GitHub Releases (not committed to main).
+dist/
 
-# pytest / mypy
+# Test / lint caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# venv
+# Virtualenvs
 .venv/
 venv/
 .env
@@ -27,11 +27,10 @@ venv/
 # macOS
 .DS_Store
 
-# CFU-counter local runtime data — keep workspace runs out of git
-data/inputs/
-data/runs/
-data/uploads/
-tests/golden_*.csv
+# Per-session runtime data created by `wecfu serve` and `wecfu web`.
+# This is the user's working directory, never source.
+data/
 
-# SAM weights
+# Optional Segment Anything weights — removed from the project but old
+# checkpoints might still be around locally.
 *.pth
