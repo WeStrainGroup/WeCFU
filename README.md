@@ -16,13 +16,12 @@ auto-cleaned after 1 h of inactivity).
 ### 2. Local install via conda
 
 ```bash
-conda create -n wecfu -c westraingroup -c conda-forge wecfu -y
-conda activate wecfu
-wecfu serve         # opens http://127.0.0.1:8765 in your browser
+conda install westraingroup::wecfu
+wecfu serve
 ```
 
-That's it. No image limits, fully offline. Detailed walkthrough in
-[USAGE.md](USAGE.md); other install methods (pip wheel, source clone) in
+No image limits, fully offline. Detailed walkthrough in [USAGE.md](USAGE.md);
+other install methods (fresh env, pip wheel, source clone) in
 [INSTALL.md](INSTALL.md).
 
 ### 3. Command line, for batch jobs
