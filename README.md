@@ -95,7 +95,13 @@ All seven parameter names match the GUI labels one-for-one.
 | Min circularity | 0–1         | Tighten to filter irregular debris; loosen to keep oddly-shaped colonies. |
 | Min area frac   | small float | Tiny pinpoint colonies missed? Lower. Specks counted? Raise. |
 | Peak min distance | px        | Touching colonies merged? Lower. One colony split in two? Raise. |
-| New colony radius | px        | Visual only — size of the green circle drawn when you left-click. |
+
+The bottom row of the params bar has two UI helpers that don't affect counts:
+
+| Field | What it does |
+| --- | --- |
+| New colony radius   | Size (in pixels) of the green circle drawn when you left-click to add a manual colony. Visual only. |
+| Live threshold preview | While ticked, the canvas overlays a green tint on every pixel currently passing the `Min value` / `Max saturation` gate, so you can see what the algorithm "sees" before clicking *Apply and recount*. |
 
 ## Project layout
 
