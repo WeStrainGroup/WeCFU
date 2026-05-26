@@ -454,22 +454,39 @@ async function ingestPath(p) {
 }
 
 async function uploadFiles(fileList) {
+  if (!fileList.length) return;
   const batch = 'upload_' + new Date().toISOString().replace(/[:.]/g, '-');
+  const totalBytes = Array.from(fileList).reduce((a, f) => a + (f.size || 0), 0);
+  const totalMB = (totalBytes / 1024 / 1024).toFixed(1);
+
+  setStatus(`Uploading ${fileList.length} files (${totalMB} MB)…`);
+
+  // Use XHR so we get real upload progress events (fetch does not expose them).
   const fd = new FormData();
   fd.append('batch', batch);
   for (const f of fileList) fd.append('files', f);
-  setStatus(t('statusUploading'));
-  const r = await fetch('/api/upload', { method: 'POST', body: fd });
+
+  const result = await new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+    xhr.upload.addEventListener('progress', (e) => {
+      if (!e.lengthComputable) return;
+      const pct = Math.round(e.loaded / e.total * 100);
+      const mb  = (e.loaded / 1024 / 1024).toFixed(1);
+      setStatus(`Uploading ${fileList.length} files: ${pct}% (${mb}/${totalMB} MB)`);
+    });
+    xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300,
+                                 status: xhr.status, text: xhr.responseText });
+    xhr.onerror = () => resolve({ ok: false, status: 0, text: 'network error' });
+    xhr.send(fd);
+  });
+
   setStatus('');
-  if (!r.ok) {
-    // Surface the server's reason (e.g. "Per-session limit is 100 images
-    // (you have 0, tried to add 137)") so the user knows why nothing
-    // appeared. Previously this silently no-op'd, which looked like a bug.
-    let msg = `Upload failed (HTTP ${r.status})`;
-    try {
-      const body = await r.json();
-      if (body.detail) msg = body.detail;
-    } catch (_) { /* ignore parse errors */ }
+
+  if (!result.ok) {
+    let msg = `Upload failed (HTTP ${result.status})`;
+    try { const body = JSON.parse(result.text); if (body.detail) msg = body.detail; }
+    catch (_) { /* ignore */ }
     alert(msg);
     return;
   }
@@ -477,19 +494,21 @@ async function uploadFiles(fileList) {
   await loadImages();
 }
 
+// Recursively collect every File under a dropped FileSystemEntry directory.
+// Written with explicit awaits because the older
+// `reader.readEntries(async cb)` pattern raced with Chrome's batching and
+// silently returned early on folders with many files.
 async function walkDir(entry, out) {
+  if (entry.isFile) {
+    out.push(await new Promise(res => entry.file(res)));
+    return;
+  }
   const reader = entry.createReader();
-  await new Promise(resolve => {
-    const read = () => reader.readEntries(async entries => {
-      if (!entries.length) { resolve(); return; }
-      for (const e of entries) {
-        if (e.isFile) await new Promise(res => e.file(f => { out.push(f); res(); }));
-        else if (e.isDirectory) await walkDir(e, out);
-      }
-      read();
-    });
-    read();
-  });
+  while (true) {
+    const batch = await new Promise(res => reader.readEntries(res));
+    if (!batch.length) break;        // empty = finished
+    for (const e of batch) await walkDir(e, out);
+  }
 }
 
 // ── export modal ────────────────────────────────────────────────────────
@@ -680,14 +699,34 @@ function wireUpHandlers() {
   dz.addEventListener('drop', async e => {
     e.preventDefault();
     dz.classList.remove('dragging');
-    const files = [];
+
+    // Snapshot the DataTransferItems before any await — webkitGetAsEntry
+    // becomes invalid once the event finishes dispatching.
+    const entries = [];
     for (const it of e.dataTransfer.items) {
+      if (it.kind !== 'file') continue;
       const entry = it.webkitGetAsEntry?.();
-      if (entry?.isFile) files.push(it.getAsFile());
-      else if (entry?.isDirectory) await walkDir(entry, files);
-      else if (it.kind === 'file') files.push(it.getAsFile());
+      if (entry) entries.push(entry);
+      else {                        // fall back to plain file
+        const f = it.getAsFile();
+        if (f) entries.push({ isFile: true, _plain: f });
+      }
     }
-    if (files.length) await uploadFiles(files);
+
+    const files = [];
+    setStatus(`Reading ${entries.length === 1 && entries[0].isDirectory ? 'folder' : 'files'}…`);
+    for (const entry of entries) {
+      if (entry._plain) { files.push(entry._plain); continue; }
+      await walkDir(entry, files);
+    }
+    // Keep only supported images.
+    const imgs = files.filter(f => /\.(jpe?g|png|tif{1,2})$/i.test(f.name || ''));
+    setStatus('');
+    if (!imgs.length) {
+      alert('No image files found in the drop. Supported: .jpg .jpeg .png .tif .tiff');
+      return;
+    }
+    await uploadFiles(imgs);
   });
 }
 
