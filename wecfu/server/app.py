@@ -35,8 +35,8 @@ _IMG_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 _STATIC = Path(__file__).parent / "static"
 
 # Web-mode upload limits (per request body & per session). Ignored in local mode.
-WEB_MAX_BYTES = 200 * 1024 * 1024   # 200 MB per upload request
-WEB_MAX_IMAGES = 50                 # cap on images per session
+WEB_MAX_BYTES = 400 * 1024 * 1024   # 400 MB per upload request
+WEB_MAX_IMAGES = 100                # cap on images per session
 
 
 class IngestBody(BaseModel):

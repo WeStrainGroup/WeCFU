@@ -459,8 +459,20 @@ async function uploadFiles(fileList) {
   fd.append('batch', batch);
   for (const f of fileList) fd.append('files', f);
   setStatus(t('statusUploading'));
-  await fetch('/api/upload', { method: 'POST', body: fd });
+  const r = await fetch('/api/upload', { method: 'POST', body: fd });
   setStatus('');
+  if (!r.ok) {
+    // Surface the server's reason (e.g. "Per-session limit is 100 images
+    // (you have 0, tried to add 137)") so the user knows why nothing
+    // appeared. Previously this silently no-op'd, which looked like a bug.
+    let msg = `Upload failed (HTTP ${r.status})`;
+    try {
+      const body = await r.json();
+      if (body.detail) msg = body.detail;
+    } catch (_) { /* ignore parse errors */ }
+    alert(msg);
+    return;
+  }
   state.batch = batch;
   await loadImages();
 }
@@ -690,6 +702,18 @@ async function applyServerConfig() {
       hide('btn-ingest');
       const pasteHint = document.querySelector('[data-i18n="pasteHint"]');
       if (pasteHint) pasteHint.style.display = 'none';
+
+      // showDirectoryPicker() is blocked in cross-origin iframes (which is
+      // exactly the HF Spaces context). Hide the picker label/button — the
+      // user will just get the browser's default download location.
+      const locLabel = document.querySelector('label.stacked > [data-i18n="exportSaveLocation"]');
+      if (locLabel && locLabel.parentElement) locLabel.parentElement.style.display = 'none';
+
+      // Update the drop-zone sub-hint: files are *uploaded*, not symlinked.
+      const sub = document.querySelector('[data-i18n="dropSubHint"]');
+      if (sub) sub.textContent = cfg.max_images
+        ? `Per session: up to ${cfg.max_images} images / ${Math.round(cfg.max_bytes / 1024 / 1024)} MB · auto-deleted after 1 h idle`
+        : '';
     }
   } catch (e) {
     console.warn('config fetch failed:', e);
