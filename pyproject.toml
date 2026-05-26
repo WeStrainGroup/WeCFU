@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wecfu"
-version = "1.0.4"
+version = "1.0.5"
 description = "WeCFU — a friendly, interactive, web-based colony counter for petri dish photos"
 readme = "README.md"
 requires-python = ">=3.10"

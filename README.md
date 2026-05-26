@@ -125,8 +125,7 @@ WeCFU/
 
 ## Citing
 
-Cite as *WeCFU v1.0.1 (WeF culturomics team, 2026)*. A BibTeX entry will be
-attached to a future release tag once the methods preprint is online.
+*To be added once the accompanying paper is published.*
 
 ## Authors
 
