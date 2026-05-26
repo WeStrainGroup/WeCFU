@@ -35,15 +35,18 @@ def _save_detections(
     plate: PlateCircle,
     diagnostics: dict,
     reviewed: bool,
-    method: str,
     params: SegmentParams,
+    machine_count_initial: int,
 ) -> None:
+    """Persist state. `machine_count_initial` is the algorithm's original
+    count at first segmentation — immutable thereafter, so the CSV can
+    report add/remove counts relative to it."""
     payload = {
         "plate": {"cx": plate.cx, "cy": plate.cy, "r": plate.r},
         "detections": [d.asdict() for d in detections],
         "diagnostics": diagnostics,
         "reviewed": reviewed,
-        "method": method,
+        "machine_count_initial": machine_count_initial,
         "params": asdict(params),
     }
     path.write_text(json.dumps(payload, indent=2))
@@ -73,21 +76,27 @@ def process_image(
         plate = PlateCircle(**existing["plate"])
         dets = [Detection(**d) for d in existing["detections"]]
         diagnostics = existing.get("diagnostics", {})
-        method = existing.get("method", "cv")
+        machine_count_initial = existing.get(
+            "machine_count_initial",
+            sum(1 for d in dets if d.source == "cv"),
+        )
     else:
         plate = detect_plate(img_bgr)
         dets, diagnostics = segment(img_bgr, plate, params)
-        method = "cv"
-        _save_detections(det_path, dets, plate, diagnostics, False, method, params)
+        machine_count_initial = len(dets)  # all cv at this point
+        _save_detections(det_path, dets, plate, diagnostics, False, params, machine_count_initial)
 
     overlay_img = render(img_bgr, dets, plate)
     cv2.imwrite(str(overlay_path), overlay_img)
 
+    cv_remaining = sum(1 for d in dets if d.source == "cv")
+    manual_count = sum(1 for d in dets if d.source == "manual")
     row = {
         "filename": img_path.name,
-        "cfu_count": len(dets),
-        "n_manual": sum(1 for d in dets if d.source == "manual"),
-        "low_confidence": diagnostics.get("low_confidence", False),
+        "total_count": len(dets),
+        "machine_count": machine_count_initial,
+        "n_removed": machine_count_initial - cv_remaining,
+        "n_added": manual_count,
         "notes": existing.get("notes", "") if existing else "",
     }
     return row

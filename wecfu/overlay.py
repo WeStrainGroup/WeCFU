@@ -15,9 +15,8 @@ import numpy as np
 from .plate import PlateCircle
 from .segment import Detection
 
-_COLOR_CV = (40, 220, 40)        # green     — auto-detected
-_COLOR_MANUAL = (240, 160, 40)   # cyan      — manual addition
-_COLOR_SAM = (200, 60, 220)      # magenta   — SAM-detected
+_COLOR_CV = (239, 159, 74)       # blue   — machine-detected (BGR)
+_COLOR_MANUAL = (84, 212, 134)   # green  — manually added (BGR)
 _BG = (32, 32, 32)               # neutral grey outside the plate
 _PAD = 24                        # padding around the plate when cropping
 
@@ -25,8 +24,6 @@ _PAD = 24                        # padding around the plate when cropping
 def _color(d: Detection) -> tuple:
     if d.source == "manual":
         return _COLOR_MANUAL
-    if d.source == "sam":
-        return _COLOR_SAM
     return _COLOR_CV
 
 

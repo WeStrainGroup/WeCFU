@@ -44,8 +44,12 @@ aside#sidebar { width: 300px; min-width: 300px; border-right: 1px solid #2d3036;
 .image-row .row-count { font-weight: 600; min-width: 26px; text-align: right; }
 .image-row .row-flag { width: 9px; height: 9px; border-radius: 50%;
                        background: #555; cursor: help; flex-shrink: 0; }
+/* Three sidebar states (CSS order matters: later rules win)
+   default  gray   not yet counted
+   counted  blue   machine-counted but you haven't opened it
+   reviewed green  you have viewed or edited it */
+.image-row.counted  .row-flag { background: #4a9fef; }
 .image-row.reviewed .row-flag { background: #54d486; }
-.image-row.low-conf .row-flag { background: #e3a73d; }
 .image-row.has-notes::after { content: '✎'; opacity: 0.7; }
 
 /* ── viewer ────────────────────────────────────────────────────────── */
@@ -65,12 +69,12 @@ canvas#canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
 #legend { padding: 6px 16px; border-top: 1px solid #2d3036; background: #181a1f; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
        vertical-align: middle; margin-right: 4px; }
-.dot-cv { background: #28dc28; }
-.dot-manual { background: #28a0f0; }
+.dot-cv { background: #4a9fef; }       /* blue — machine-detected */
+.dot-manual { background: #54d486; }   /* green — manually added */
 
 #params { padding: 8px 16px; border-top: 1px solid #2d3036;
-          display: flex; flex-wrap: wrap; gap: 10px;
-          background: #14161a; align-items: center; }
+          background: #14161a; display: flex; flex-direction: column; gap: 6px; }
+#params .params-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 #params label { display: flex; align-items: center; gap: 6px; }
 #params input[type=number] { width: 80px; padding: 4px 6px;
                              background: #0f1115; color: #e4e6eb;

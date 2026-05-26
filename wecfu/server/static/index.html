@@ -48,30 +48,36 @@
       </div>
 
       <div id="legend" class="muted">
-        <span class="dot dot-cv"></span><span data-i18n="legendAuto">auto</span> ·
-        <span class="dot dot-manual"></span><span data-i18n="legendManual">manual</span> ·
+        <span class="dot dot-cv"></span><span data-i18n="legendAuto">Machine</span> ·
+        <span class="dot dot-manual"></span><span data-i18n="legendManual">Manual</span> ·
         <span data-i18n="legend"></span>
       </div>
 
       <div id="params">
-        <label><span data-i18n="presetLabel">Preset</span>
-          <select id="preset-select">
-            <option value="white"  data-i18n="presetWhite">White colonies (default)</option>
-            <option value="cream"  data-i18n="presetCream">Cream or pale yellow</option>
-            <option value="yellow" data-i18n="presetYellow">Yellow colonies</option>
-            <option value="any"    data-i18n="presetAny">Any bright</option>
-            <option value="custom" data-i18n="presetCustom">Custom</option>
-          </select>
-        </label>
-        <label><span data-i18n="paramRadius">New colony radius (px)</span> <input type="number" id="p-radius" value="40" min="3" max="300"/></label>
-        <label><span data-i18n="paramMinValue">min value</span> <input type="number" id="p-min-value" value="200" min="0" max="255"/></label>
-        <label><span data-i18n="paramMaxSat">max saturation</span> <input type="number" id="p-max-sat" value="60" min="0" max="255"/></label>
-        <label><span data-i18n="paramInset">plate inset</span> <input type="number" id="p-inset" value="0.82" step="0.01" min="0.5" max="1.0"/></label>
-        <label><span data-i18n="paramCirc">min circularity</span> <input type="number" id="p-circ" value="0.55" step="0.05" min="0" max="1"/></label>
-        <label><span data-i18n="paramArea">min area frac</span> <input type="number" id="p-min-area" value="0.0001" step="0.00005" min="0" max="0.01"/></label>
-        <label><span data-i18n="paramPeak">peak min distance</span> <input type="number" id="p-peak" value="15" min="2" max="80"/></label>
-        <label><input type="checkbox" id="p-preview"/> <span data-i18n="livePreview">Live threshold preview</span></label>
-        <button id="btn-apply-params" data-i18n="applyParams">Apply and recount</button>
+        <!-- Row 1: algorithm thresholds, preset, apply button -->
+        <div class="params-row">
+          <label><span data-i18n="presetLabel">Preset</span>
+            <select id="preset-select">
+              <option value="white"  data-i18n="presetWhite">White colonies (default)</option>
+              <option value="cream"  data-i18n="presetCream">Cream or pale yellow</option>
+              <option value="yellow" data-i18n="presetYellow">Yellow colonies</option>
+              <option value="any"    data-i18n="presetAny">Any bright</option>
+              <option value="custom" data-i18n="presetCustom">Custom</option>
+            </select>
+          </label>
+          <label><span data-i18n="paramMinValue">Min value</span> <input type="number" id="p-min-value" value="200" min="0" max="255"/></label>
+          <label><span data-i18n="paramMaxSat">Max saturation</span> <input type="number" id="p-max-sat" value="60" min="0" max="255"/></label>
+          <label><span data-i18n="paramInset">Plate inset</span> <input type="number" id="p-inset" value="0.82" step="0.01" min="0.5" max="1.0"/></label>
+          <label><span data-i18n="paramCirc">Min circularity</span> <input type="number" id="p-circ" value="0.55" step="0.05" min="0" max="1"/></label>
+          <label><span data-i18n="paramArea">Min area frac</span> <input type="number" id="p-min-area" value="0.0001" step="0.00005" min="0" max="0.01"/></label>
+          <label><span data-i18n="paramPeak">Peak min distance</span> <input type="number" id="p-peak" value="15" min="2" max="80"/></label>
+          <button id="btn-apply-params" data-i18n="applyParams">Apply and recount</button>
+        </div>
+        <!-- Row 2: review-side helpers -->
+        <div class="params-row">
+          <label><span data-i18n="paramRadius">New colony radius</span> <input type="number" id="p-radius" value="40" min="3" max="300"/></label>
+          <label><input type="checkbox" id="p-preview"/> <span data-i18n="livePreview">Live threshold preview</span></label>
+        </div>
       </div>
 
       <div id="notes-bar">

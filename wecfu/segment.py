@@ -48,7 +48,7 @@ class Detection:
     r: float
     score: float = 1.0
     accepted: bool = True
-    source: str = "cv"  # "cv" | "sam" | "manual"
+    source: str = "cv"  # "cv" (machine-detected) | "manual" (user-added)
 
     def asdict(self) -> dict:
         return asdict(self)

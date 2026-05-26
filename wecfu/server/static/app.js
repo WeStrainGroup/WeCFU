@@ -109,14 +109,15 @@ function renderImageList() {
   for (const it of state.imageList) {
     const row = document.createElement('div');
     row.className = 'image-row';
-    if (it.reviewed) row.classList.add('reviewed');
-    if (it.low_confidence) row.classList.add('low-conf');
+    // Three dot states (CSS picks the strongest one).
+    if (it.processed) row.classList.add('counted');
+    if (it.reviewed)  row.classList.add('reviewed');
     if (it.notes) row.classList.add('has-notes');
     if (it.name === state.imageName) row.classList.add('selected');
 
     const flagTitle = it.reviewed ? t('flagReviewed')
-                     : it.low_confidence ? t('flagLowConfidence')
-                     : !it.processed ? t('flagUnprocessed') : '';
+                     : it.processed ? t('flagCounted')
+                     : t('flagUnprocessed');
 
     row.innerHTML = `
       <span class="row-flag" title="${flagTitle}"></span>
@@ -165,8 +166,7 @@ async function loadDetections({ refit = false } = {}) {
   state.detections = data.detections;
   state.plate = data.plate;
   updateCountBadge();
-  const lc = data.diagnostics?.low_confidence ? `· ${t('metaLowConf')}` : '';
-  $('meta-tag').textContent = lc;
+  $('meta-tag').textContent = '';
   await loadRawImage();
   if (refit || !state.view.ready) { fitToCanvas(); state.view.ready = true; }
   draw();
@@ -261,7 +261,9 @@ function draw() {
   ctx.lineWidth = 3 / state.view.zoom;
   ctx.font = `${Math.max(11, 16 / state.view.zoom)}px sans-serif`;
   for (const d of state.detections) {
-    const color = d.source === 'manual' ? '#28a0f0' : '#28dc28';
+    // Match overlay.py colors and CSS legend dots:
+    // machine-detected = blue, manually-added = green.
+    const color = d.source === 'manual' ? '#54d486' : '#4a9fef';
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.beginPath();

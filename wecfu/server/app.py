@@ -155,22 +155,16 @@ def build_app(root: Path) -> FastAPI:
             state = json.loads(det_path.read_text()) if det_path.exists() else None
             count = 0
             reviewed = False
-            low_conf = False
-            method = None
             notes = ""
             if state:
                 count = len(state.get("detections", []))
                 reviewed = state.get("reviewed", False)
-                low_conf = state.get("diagnostics", {}).get("low_confidence", False)
-                method = state.get("method")
                 notes = state.get("notes", "")
             items.append({
                 "name": p.name,
                 "processed": state is not None,
                 "count": count,
                 "reviewed": reviewed,
-                "low_confidence": low_conf,
-                "method": method,
                 "notes": notes,
             })
         return {"images": items}
@@ -347,8 +341,12 @@ def build_app(root: Path) -> FastAPI:
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
-            "filename", "cfu_count",
-            "n_manual", "low_confidence", "notes",
+            "filename",
+            "total_count",      # final number after all human edits
+            "machine_count",    # algorithm's original count, immutable
+            "n_removed",        # machine detections the user deleted
+            "n_added",          # manual detections the user added
+            "notes",
         ])
         for p in sorted(in_dir.iterdir()):
             if p.suffix.lower() not in _IMG_EXTS:
@@ -356,15 +354,18 @@ def build_app(root: Path) -> FastAPI:
             det_p = _det_path(root, batch, p.name)
             state = json.loads(det_p.read_text()) if det_p.exists() else None
             if not state:
-                writer.writerow([p.name, "", 0, "", ""])
+                writer.writerow([p.name, "", "", "", "", ""])
                 continue
             dets = state["detections"]
-            diag = state.get("diagnostics", {})
+            cv_remaining = sum(1 for d in dets if d.get("source") == "cv")
+            manual = sum(1 for d in dets if d.get("source") == "manual")
+            machine_initial = state.get("machine_count_initial", cv_remaining)
             writer.writerow([
                 p.name,
                 len(dets),
-                sum(1 for d in dets if d.get("source") == "manual"),
-                diag.get("low_confidence", False),
+                machine_initial,
+                machine_initial - cv_remaining,
+                manual,
                 state.get("notes", ""),
             ])
         return buf.getvalue()
