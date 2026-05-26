@@ -1,126 +1,101 @@
 # WeCFU
 
-Friendly, browser-based **CFU (colony-forming unit) counter** for culturomics
-plate photos. Drag a folder of plate images into a browser window, get
-auto-counted plates with each colony numbered, then click-review (add / delete)
-and export a CSV ready for downstream analysis.
+Friendly, browser-based **CFU (colony-forming unit) counter** for petri-dish photos.
+Drag images in, get auto-counted plates with each colony numbered, click-review
+(add / delete), then export a CSV.
 
-**🦠 Try it instantly — no install:** https://huggingface.co/spaces/WeCFU/wecfu
+## Three ways to use
 
-For long-term / offline / large-batch use, install locally — see
-[INSTALL.md](INSTALL.md). Built for the WeF culturomics dataset but applies
-to any standard top-down glass-petri photo with light colonies on a darker
-agar. Small, dependency-light, reproducible — not a black box.
+### 1. Browser, no install ✨
 
-## Quickstart
+**https://huggingface.co/spaces/WeCFU/wecfu**
+
+Just open the link. Each visitor gets a private session (≤ 100 images / 400 MB,
+auto-cleaned after 1 h of inactivity).
+
+### 2. Local install via conda
 
 ```bash
-# 1. create the env (once)
-conda env create -f environment.yml
+conda create -n wecfu -c westraingroup -c conda-forge wecfu -y
 conda activate wecfu
-pip install -e .
-
-# 2. launch the GUI; it opens at http://127.0.0.1:8765
-wecfu serve
-
-# 3. (optional) batch-mode for headless use
-wecfu batch /path/to/plate/photos --out runs/2026-05-21
+wecfu serve         # opens http://127.0.0.1:8765 in your browser
 ```
 
-In the GUI:
+That's it. No image limits, fully offline. Detailed walkthrough in
+[USAGE.md](USAGE.md); other install methods (pip wheel, source clone) in
+[INSTALL.md](INSTALL.md).
 
-- **Drop a folder or files** onto the upload zone (or paste an absolute path
-  and click *Ingest path*). The tool **symlinks** rather than copies your
-  originals — your source folder is never modified.
-- Click **Run all** to auto-detect colonies.
-- Click a plate in the left list → it loads in the canvas with each
-  detected colony numbered.
-- **Left-click** empty space → add a manual colony (cyan).
-- **Right-click** a circle → delete it.
-- **Cmd/Ctrl-Z** to undo, **← / →** for prev/next image, **Space** to mark reviewed.
-- **Cmd/Ctrl-drag** to pan, scroll to zoom.
-- Pick a colony-color **preset** (white / cream / yellow / any) or tweak the
-  sliders. Tick **live mask preview** to see in real time which pixels are
-  being treated as colonies.
-- **Export CSV** for just the counts, or **Export bundle (zip)** for CSV +
-  annotated overlay PNGs + per-image JSON state.
+### 3. Command line, for batch jobs
 
-## Output
+```bash
+wecfu batch /path/to/plate/photos --out /path/to/results
+```
 
-For each run under `data/runs/<batch>/`:
+Produces `results.csv` plus an annotated overlay per image.
 
-- `detections/<stem>.json` — editable state of record (per-colony center,
-  radius, accepted, source, reviewed flag, parameters, diagnostics).
-- `overlays/<stem>.png` — annotated review image with numbered circles.
-- Export → `cfu_<batch>.csv`.
+## Using the GUI
+
+- **Drop** image files or a folder onto the left side. Files are uploaded (or
+  symlinked in local mode) — your originals are never modified.
+- **Count all** runs the algorithm on every image. Opening an un-counted image
+  also auto-runs once, so the "drop and click around" flow Just Works.
+- On any image:
+  - **Left-click** empty plate area → add a manual colony (green).
+  - **Right-click** a circle → delete it.
+  - **Cmd / Ctrl-Z** → undo. **← / →** → previous / next image.
+  - **Wheel** → zoom. **Cmd / Ctrl-drag** → pan.
+- Pick a colour **preset** (white / cream / yellow / any), or tune the seven
+  algorithm parameters by hand. Tick **Live threshold preview** to see in real
+  time which pixels are being treated as colonies.
+- Sidebar dot states: **grey** = not counted, **blue** = counted, **green** =
+  viewed or edited.
+- **Export CSV** writes the slim 5-column table; **Export bundle** writes a
+  zip with the CSV, annotated overlay PNGs, and a JSON state file per image.
+
+## CSV columns
+
+| column | meaning |
+| --- | --- |
+| `filename` | the source image |
+| `total_count` | final colony count after any human edits |
+| `machine_count` | what the algorithm produced on its most recent run |
+| `n_removed` | machine detections the user deleted |
+| `n_added` | manual detections the user added |
+| `notes` | per-image free-text note from the GUI |
+
+`total_count = machine_count − n_removed + n_added`.
 
 ## Algorithm
 
-Two-layer pipeline; both layers operate on a single BGR image.
+A single classical-CV pipeline; no deep-learning dependency, no GPU.
 
-### Layer 1 — classical CV (default)
-
-1. **Plate localisation.** Downsample to 800 px max side, Gaussian
-   median-blur, then `cv2.HoughCircles` for the dish boundary. If that
-   fails, fall back to the largest highly-circular contour
-   (`circularity ≥ 0.80`) of an Otsu-thresholded binary. Returns
-   `(cx, cy, r)`.
-2. **ROI mask.** A disk of radius `plate_inset · r` (default `0.82`),
-   conservatively inside the agar to avoid the glass rim and the
-   agar–glass glare ring.
-3. **White-colony gate.** Convert to HSV; keep pixels with
-   `V ≥ min_value` (default 200) **and** `S ≤ max_saturation` (default 60)
-   inside the ROI. This selects bright, near-white pixels and rejects
-   yellow agar streaks or amber media stains.
-4. **Cleanup.** Morphological opening (5×5 ellipse) removes specks;
-   closing (9×9) fills the small interior holes typical of saturated
-   highlights at colony centers.
+1. **Plate localisation.** `cv2.HoughCircles` on a downsampled grey image,
+   with a largest-circular-contour fallback if Hough finds nothing.
+2. **ROI mask.** Disk of radius `plate_inset · r` (default 0.82) — drops the
+   glass rim and the agar-glass glare ring.
+3. **White-colony gate.** HSV: keep pixels with `V ≥ Min value` (default 200)
+   and `S ≤ Max saturation` (default 60). Bright, near-white colonies pass;
+   yellow agar streaks don't.
+4. **Cleanup.** Morphological open then close to remove specks and fill
+   saturated-highlight holes at colony centres.
 5. **Touching-colony split.** Distance transform + watershed seeded by
-   `skimage.feature.peak_local_max` with `min_distance = 15 px`,
-   `threshold_rel = 0.5`. Each watershed basin → one candidate.
-6. **Shape filter.** Each basin's largest contour must satisfy
-   `min_area_frac ≤ area / plate_area ≤ max_area_frac`,
-   `circularity ≥ min_circularity` (0.55),
-   `solidity ≥ min_solidity` (0.80),
-   `eccentricity ≤ max_eccentricity` (0.88).
-7. **Low-confidence flag.** Foreground fraction > 15 % of the plate, or
-   many regions rejected for shape with > 5 % foreground → likely
-   confluent / swarming → flagged in the UI as `LOW CONF`.
+   `peak_local_max` with `min_distance = Peak min distance` (default 15 px).
+6. **Shape filter.** Area ∈ [`Min area frac`, max_area_frac] × plate-area,
+   circularity ≥ `Min circularity` (0.55), solidity ≥ 0.80, eccentricity ≤ 0.88.
 
-### Layer 2 — SAM fallback (on demand)
+All seven parameter names match the GUI labels one-for-one.
 
-For dense/touching plates the user clicks **SAM** on a specific image. We
-lazily import `segment_anything` (ViT-B; ~358 MB checkpoint at
-`~/.cache/wecfu/sam_vit_b.pth`) and run
-`SamAutomaticMaskGenerator` (`points_per_side=48`). The same area /
-circularity filter as Layer 1 is applied to SAM's masks. Lazy install:
+## Parameter cheat-sheet
 
-```bash
-pip install segment-anything torch
-mkdir -p ~/.cache/wecfu
-curl -L https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth \
-  -o ~/.cache/wecfu/sam_vit_b.pth
-```
-
-### Manual layer
-
-Any plate the user touches (add / delete) is marked `reviewed=True` and
-skipped on subsequent batch runs (unless `--force`). The CSV records
-`n_manual` so manual additions stay auditable; the per-image JSON in the
-export bundle records every detection's origin (`cv` / `sam` / `manual`).
-
-## Filename convention
-
-The tool expects:
-
-```
-P<plate>V<version>_G[+|-]_<medium>_<dilution>_<aer|ana>_day<N>_<rep>_<YYYYMMDD_HHMMSS>.jpg
-```
-
-e.g. `P01V18_G+_YM_1X_aer_day9_1_20260521_162517.jpg`.
-
-If a filename doesn't match, the row still appears in the CSV with empty
-metadata columns; counting still works.
+| Slider | Range | When to nudge it |
+| --- | --- | --- |
+| Min value       | 0–255       | Empty plate over-counting? Raise. Real colonies missed? Lower. |
+| Max saturation  | 0–255       | Want to include yellow / orange colonies? Raise. Yellow agar bleed counted? Lower. |
+| Plate inset     | 0–1         | Rim glare counted? Lower (e.g. 0.78). |
+| Min circularity | 0–1         | Tighten to filter irregular debris; loosen to keep oddly-shaped colonies. |
+| Min area frac   | small float | Tiny pinpoint colonies missed? Lower. Specks counted? Raise. |
+| Peak min distance | px        | Touching colonies merged? Lower. One colony split in two? Raise. |
+| New colony radius | px        | Visual only — size of the green circle drawn when you left-click. |
 
 ## Project layout
 
@@ -128,41 +103,32 @@ metadata columns; counting still works.
 WeCFU/
 ├── wecfu/
 │   ├── plate.py          # plate detection
-│   ├── segment.py        # Layer 1 CV pipeline
-│   ├── sam_refine.py     # Layer 2 SAM (lazy)
-│   ├── naming.py         # filename parser
+│   ├── segment.py        # CV pipeline
+│   ├── naming.py         # filename metadata parser
 │   ├── pipeline.py       # orchestration
-│   ├── overlay.py        # rendering
-│   ├── cli.py            # CLI entry
+│   ├── overlay.py        # annotated-image rendering
+│   ├── cli.py            # 'wecfu batch / serve / web' entrypoints
 │   └── server/
-│       ├── app.py        # FastAPI backend
-│       └── static/       # vanilla HTML+JS+CSS frontend
-├── data/
-│   ├── inputs/<batch>/   # symlinks / uploaded images
-│   └── runs/<batch>/
-│       ├── detections/   # editable JSON state
-│       ├── overlays/     # annotated PNGs
-│       └── results.csv   # batch-mode aggregate
+│       ├── app.py        # FastAPI routes (single-user + web mode)
+│       ├── web.py        # per-visitor session middleware (web mode)
+│       └── static/       # vanilla HTML + JS + CSS frontend
+├── Dockerfile            # Hugging Face Spaces image
+├── meta.yaml             # conda-build recipe
+├── pyproject.toml        # pip / wheel build
 └── tests/
 ```
 
-## Calibration tips
-
-- Empty plate counting >0 → raise `min_value` (e.g. 215) or lower
-  `plate_inset` (e.g. 0.78) to drop the agar–glass rim ring.
-- Real colonies missed → lower `min_value` (e.g. 180) or `min_circularity`
-  (e.g. 0.45). Watch for false positives.
-- Touching colonies merged into one → lower `peak_min_distance` in the GUI
-  rerun, or use SAM.
-- Yellow / cream / non-white colonies → raise `max_saturation` (e.g. 120)
-  to include them. The white-gate is intentionally strict by default.
-
 ## Citing
 
-Please cite as: *WeCFU v0.1 (WeF culturomics, 2026)*. A pre-print
-describing the validation set and accuracy is in preparation; see the
-upcoming repository release for the BibTeX entry.
+Cite as *WeCFU v1.0.1 (WeF culturomics team, 2026)*. A BibTeX entry will be
+attached to a future release tag once the methods preprint is online.
+
+## Authors
+
+- Jianghua Zhang (张江华) — `zhangjianghua@westlake.edu.cn`
+- Xinyu Wang (王欣宇) — `wangxinyu30@westlake.edu.cn`
+- Zhanyi Zhu (朱展翼) — `zhuzhanyi@westlake.edu.cn`
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).
