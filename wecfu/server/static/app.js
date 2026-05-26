@@ -144,8 +144,9 @@ async function selectImage(name) {
   // labels and the CSV row is blank. This makes the "drop → click → count"
   // flow Just Work without an explicit "Count all" step for a single image.
   const row = state.imageList.find(i => i.name === name);
-  if (row && !row.processed) {
-    setStatus(t('statusProcessing'));
+  const needsRun = row && !row.processed;
+  if (needsRun) {
+    setStatus(t('statusAutoCounting'));
     try {
       await fetch(imgURL('/run'), {
         method: 'POST',
@@ -154,10 +155,13 @@ async function selectImage(name) {
       });
       if (row) row.processed = true;
     } catch (e) { console.warn('auto-run failed:', e); }
-    setStatus('');
   }
 
+  // Keep the status message visible through loadDetections so there is no
+  // confusing "nothing happening" gap between the run finishing and the
+  // circles appearing on canvas.
   await loadDetections({ refit: true });
+  if (needsRun) setStatus('');
   $('notes-input').value = state.imageList.find(i => i.name === name)?.notes || '';
   // Opening an image auto-marks it as reviewed (green dot in the sidebar).
   // The button has been removed in v0.1.5 — review = "you have looked at this".
