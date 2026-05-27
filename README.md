@@ -140,6 +140,7 @@ WeCFU/
 
 - Jianghua Zhang (张江华) — `zhangjianghua@westlake.edu.cn`
 - Xinyu Wang (王欣宇) — `wangxinyu30@westlake.edu.cn`
+- Wenhao Zhou (周文浩) — `zhouwenhao@westlake.edu.cn`
 - Zhanyi Zhu (朱展翼) — `zhuzhanyi@westlake.edu.cn`
 
 ## License

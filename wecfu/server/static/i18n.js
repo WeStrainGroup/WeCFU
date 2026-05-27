@@ -16,6 +16,8 @@ const AUTHORS_FOOTER = `
     <a href="mailto:zhangjianghua@westlake.edu.cn">zhangjianghua@westlake.edu.cn</a></p>
   <p>Xinyu Wang (王欣宇) &mdash;
     <a href="mailto:wangxinyu30@westlake.edu.cn">wangxinyu30@westlake.edu.cn</a></p>
+  <p>Wenhao Zhou (周文浩) &mdash;
+    <a href="mailto:zhouwenhao@westlake.edu.cn">zhouwenhao@westlake.edu.cn</a></p>
   <p>Zhanyi Zhu (朱展翼) &mdash;
     <a href="mailto:zhuzhanyi@westlake.edu.cn">zhuzhanyi@westlake.edu.cn</a></p>
 </div>`;

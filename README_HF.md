@@ -19,12 +19,13 @@ A friendly, interactive, browser-based colony counter for petri-dish photos.
 - Multi-language UI (English, 简体中文, 日本語, Español, Français)
 - Built-in help modal with parameter cheatsheet
 - Per-visitor session isolation; sessions auto-delete after 1 hour of inactivity
-- Upload limits: 50 images / 200 MB per session
+- Upload limits: 100 images / 400 MB per session
 
 **Authors**
 
 - Jianghua Zhang (张江华) — zhangjianghua@westlake.edu.cn
 - Xinyu Wang (王欣宇) — wangxinyu30@westlake.edu.cn
+- Wenhao Zhou (周文浩) — zhouwenhao@westlake.edu.cn
 - Zhanyi Zhu (朱展翼) — zhuzhanyi@westlake.edu.cn
 
 **Source**: github.com/WeStrainGroup/WeCFU

@@ -4,15 +4,12 @@ The physical setup we use to take the petri-dish photos that WeCFU then
 counts. Anyone can replicate it: a single 3D-printed base + one
 off-the-shelf overhead camera.
 
-<p align="center"><img src="preview.png" width="320" alt="rendered preview of the printed base" /></p>
-
-<!--
-Real-photo gallery — drop the JPEGs into hardware/photos/ and uncomment.
-   <p align="center">
-     <img src="photos/rig.jpg"   width="46%" alt="assembled rig" />
-     <img src="photos/plate.jpg" width="46%" alt="petri dish in the recess" />
-   </p>
--->
+<p align="center">
+  <img src="preview.png"            width="32%" alt="CAD render of the 3D-printed base" />
+  <img src="photos/rig.webp"        width="32%" alt="assembled rig: Hikvision overhead camera looking down at a petri dish on the 3D-printed base" />
+  <img src="photos/sample-plate.jpg" width="32%" alt="example photo captured by the rig — input to WeCFU" />
+</p>
+<p align="center"><sub>Left: CAD render of the base. Middle: the assembled rig in our lab. Right: a representative photo the rig produces — this is exactly what WeCFU expects as input.</sub></p>
 
 ## Bill of materials
 
@@ -24,23 +21,24 @@ Real-photo gallery — drop the JPEGs into hardware/photos/ and uncomment.
 
 ## Printing the base
 
+The `model.3mf` file is a complete print-ready specification — full
+geometry to ±0.01 mm precision plus units. Load it into any slicer
+(PrusaSlicer / Bambu Studio / Cura / OrcaSlicer) with your printer's
+own profile and you get an identical part. Nothing else is needed for
+replication.
+
 | | |
 | --- | --- |
 | Source file | [`model.3mf`](model.3mf) (single body, no supports, single material) |
 | Outer dimensions | 160 × 230 × 95 mm |
 | Petri-dish recess | Ø 88.5 mm (standard 90 mm dish) at position (107, 52) from the front-left corner of the top face |
 | Side cutout | Rectangular slot through the front so a dish can slide in/out without lifting |
-| Triangle count | 334 — trivial, prints anywhere |
 | Recommended material | PLA or PETG (this is a static mount, no thermal load) |
 | Layer height | 0.2 mm |
 | Infill | 15–20 % is plenty |
 | Supports | Not needed |
 | Print orientation | Top face up (so the petri-dish recess is the top of the print) |
 | Estimated time / filament | ~9 h / ~120 g on a typical FDM printer |
-
-`model.3mf` is a "clean" 3MF (mesh only, no embedded slicer settings) — load it in
-PrusaSlicer / Bambu Studio / Cura / OrcaSlicer and slice with your printer's
-own profile.
 
 ## Assembly
 
@@ -61,9 +59,9 @@ constant framing is what lets WeCFU treat every photo the same way.
 The WeCFU software is tuned for:
 
 - **Top-down** view, the whole plate inside the frame, plate centred-ish
-- **Dark background** around the plate (the light-box interior provides this)
-- **Even lighting** (the box's LED panels handle this)
-- Image resolution **≥ 1500 × 1500 px** (any modern phone in default mode is fine)
+- **Dark background** around the plate (the matte black base in the photo above provides this)
+- **Even lighting** (the camera's built-in LED ring handles this)
+- Image resolution **≥ 1500 × 1500 px** (the Hikvision streams 1080p or higher by default)
 - Save as JPG or PNG; either works
 
 Filename convention is optional but lets WeCFU group results automatically
@@ -72,24 +70,22 @@ across replicates — see [USAGE.md](../USAGE.md) for the suggested pattern.
 ## End-to-end pipeline
 
 ```
-  petri dish + light box + 3D base
-                ↓  (top-down photo)
-            *.jpg
-                ↓  (drag-drop or "wecfu serve")
-              WeCFU      ←   https://huggingface.co/spaces/WeCFU/wecfu
-                ↓                    or  conda install westraingroup::wecfu
-        results.csv  +  annotated overlays
+  Hikvision overhead camera + 3D-printed base + petri dish
+                            ↓  (top-down photo)
+                        *.jpg
+                            ↓  (drag-drop or "wecfu serve")
+                          WeCFU      ←   https://huggingface.co/spaces/WeCFU/wecfu
+                            ↓                    or  conda install westraingroup::wecfu
+                    results.csv  +  annotated overlays
 ```
 
 The 3D-printed base is **the only custom part** — everything else is
 either commercial-off-the-shelf or open-source software.
 
-## Reproducibility note
+## Modifying the design
 
-Only the printable `model.3mf` is preserved; the original parametric CAD
-project (with sketch history) was lost. The mesh is enough to
-re-print or to re-derive a parametric model from, since the design is
-just one cuboid + one cylindrical cutout + one rectangular cutout. If
-you want to modify the design, the easiest path is **Fusion 360 →
-Insert mesh → Convert to BRep**; the 334-triangle mesh converts in
-seconds and becomes fully editable.
+The mesh in `model.3mf` is enough to print as-is. If you want to change
+a dimension (e.g. fit a different dish size), the easiest path is
+Fusion 360 → **Insert mesh** → **Convert to BRep**; the 334-triangle
+mesh converts in seconds and becomes a fully editable solid you can
+edit like any other CAD part.
