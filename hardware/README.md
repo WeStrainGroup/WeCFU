@@ -1,18 +1,26 @@
 # WeCFU imaging hardware
 
 The physical setup we use to take the petri-dish photos that WeCFU then
-counts. Anyone can replicate it: a single 3D-printed base + an
-off-the-shelf photo light box + any phone camera.
+counts. Anyone can replicate it: a single 3D-printed base + one
+off-the-shelf overhead camera.
 
 <p align="center"><img src="preview.png" width="320" alt="rendered preview of the printed base" /></p>
 
+<!--
+Real-photo gallery — drop the JPEGs into hardware/photos/ and uncomment.
+   <p align="center">
+     <img src="photos/rig.jpg"   width="46%" alt="assembled rig" />
+     <img src="photos/plate.jpg" width="46%" alt="petri dish in the recess" />
+   </p>
+-->
+
 ## Bill of materials
 
-| Part | Role | Where |
+| Part | Role | Where we got ours |
 | --- | --- | --- |
-| Photo light box with built-in LEDs and a top viewport (~¥150 / $30) | Diffused, even illumination · acts as the dark background | Any Taobao / Amazon listing for "photo light box" / "拍摄灯箱" around 40 × 40 × 40 cm works |
-| 3D-printed base — [`model.3mf`](model.3mf) | Holds a 90 mm petri dish in a fixed, repeatable position under the camera | Print yourself, settings below |
-| Phone or webcam | The actual camera | Any modern phone works; we use a regular iPhone |
+| **Hikvision overhead USB camera** (the kind used for warehouse "unboxing / packaging" video — built-in LED ring, integrated downward arm, UVC USB) | Top-down camera + even lighting, all in one unit; no separate light box needed | [Taobao listing](https://e.tb.cn/h.R4RM1f1qXuy5tLE) (~¥150) — search "海康威视 拆包/打包摄像头" for current equivalents |
+| **3D-printed base** — [`model.3mf`](model.3mf) | Holds a 90 mm petri dish in a fixed, repeatable position under the camera | Print yourself, settings below |
+| **Laptop or PC** with a USB port | Receives the video stream and saves still photos (e.g. via Photo Booth on macOS or the Windows Camera app) | Any |
 
 ## Printing the base
 
@@ -36,13 +44,17 @@ own profile.
 
 ## Assembly
 
-1. Print the base, place it inside the light box, roughly centered.
-2. Mount your phone in the top viewport of the light box, lens looking down
-   at the petri-dish recess.
+1. Plug the Hikvision camera into your laptop via USB; verify it shows up
+   as a standard webcam.
+2. Set the 3D-printed base on a flat dark surface, directly under the
+   camera's downward arm. Centre it so the petri-dish recess is in frame.
 3. Slide a 90 mm petri dish into the recess (through the front cutout or
-   from above).
-4. Take a top-down photo. Repeat for each plate. Use a tripod / clip mount
-   for the phone so the framing stays constant across photos.
+   drop it in from above).
+4. Take a top-down still using your OS's camera app. Repeat for each plate.
+   The base + camera arm together guarantee identical framing across photos.
+
+Once everything is in position the camera arm and base shouldn't move — that
+constant framing is what lets WeCFU treat every photo the same way.
 
 ## Photo conventions for WeCFU
 

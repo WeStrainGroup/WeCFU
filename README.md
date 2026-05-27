@@ -4,9 +4,10 @@ Friendly, browser-based **CFU (colony-forming unit) counter** for petri-dish pho
 Drag images in, get auto-counted plates with each colony numbered, click-review
 (add / delete), then export a CSV.
 
-WeCFU is the *software* half of a full imaging pipeline; the *hardware* half — a
-photo light box plus a 3D-printed petri-dish jig — is documented (with the
-printable model) in [`hardware/`](hardware/).
+WeCFU is the *software* half of a full imaging pipeline; the *hardware* half —
+an overhead USB camera with integrated lighting plus a 3D-printed petri-dish
+jig — is documented (with the printable model and purchase link) in
+[`hardware/`](hardware/).
 
 ## Three ways to use
 
