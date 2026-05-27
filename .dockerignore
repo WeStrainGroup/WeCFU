@@ -16,3 +16,4 @@ tests/
 conda-recipe/
 meta.yaml
 environment.yml
+hardware/

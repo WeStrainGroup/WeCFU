@@ -4,6 +4,10 @@ Friendly, browser-based **CFU (colony-forming unit) counter** for petri-dish pho
 Drag images in, get auto-counted plates with each colony numbered, click-review
 (add / delete), then export a CSV.
 
+WeCFU is the *software* half of a full imaging pipeline; the *hardware* half — a
+photo light box plus a 3D-printed petri-dish jig — is documented (with the
+printable model) in [`hardware/`](hardware/).
+
 ## Three ways to use
 
 ### 1. Browser, no install ✨
@@ -117,6 +121,10 @@ WeCFU/
 │       ├── app.py        # FastAPI routes (single-user + web mode)
 │       ├── web.py        # per-visitor session middleware (web mode)
 │       └── static/       # vanilla HTML + JS + CSS frontend
+├── hardware/             # 3D-printed petri-dish jig + build notes
+│   ├── README.md
+│   ├── model.3mf
+│   └── preview.png
 ├── Dockerfile            # Hugging Face Spaces image
 ├── meta.yaml             # conda-build recipe
 ├── pyproject.toml        # pip / wheel build
