@@ -5,19 +5,19 @@ counts. Anyone can replicate it: a single 3D-printed base + one
 off-the-shelf overhead camera.
 
 <p align="center">
-  <img src="preview.png"            width="32%" alt="CAD render of the 3D-printed base" />
-  <img src="photos/rig.webp"        width="32%" alt="assembled rig: Hikvision overhead camera looking down at a petri dish on the 3D-printed base" />
-  <img src="photos/sample-plate.jpg" width="32%" alt="example photo captured by the rig — input to WeCFU" />
+  <img src="preview.png"             width="31%" alt="CAD render of the 3D-printed base" />
+  <img src="photos/rig.webp"         width="31%" alt="assembled rig: Hikvision overhead camera looking down at a petri dish on the 3D-printed base" />
+  <img src="photos/sample-plate.jpg" width="31%" alt="example photo captured by the rig — input to WeCFU" />
 </p>
-<p align="center"><sub>Left: CAD render of the base. Middle: the assembled rig in our lab. Right: a representative photo the rig produces — this is exactly what WeCFU expects as input.</sub></p>
+<p align="center"><sub>Left: CAD render of the base. Middle: the assembled rig in our lab. Right: a representative photo the rig produces — exactly what WeCFU expects as input.</sub></p>
 
 ## Bill of materials
 
 | Part | Role | Where we got ours |
 | --- | --- | --- |
-| **Hikvision overhead USB camera** (the kind used for warehouse "unboxing / packaging" video — built-in LED ring, integrated downward arm, UVC USB) | Top-down camera + even lighting, all in one unit; no separate light box needed | [Taobao listing](https://e.tb.cn/h.R4RM1f1qXuy5tLE) (~¥150) — search "海康威视 拆包/打包摄像头" for current equivalents |
+| **Hikvision overhead USB camera** (the kind used for warehouse "unboxing / packaging" video — built-in LED ring, integrated downward arm) | Top-down camera + even lighting, all in one unit; no separate light box needed | [Taobao listing](https://e.tb.cn/h.R4RM1f1qXuy5tLE) — search "海康威视 拆包/打包摄像头" for equivalents |
 | **3D-printed base** — [`model.3mf`](model.3mf) | Holds a 90 mm petri dish in a fixed, repeatable position under the camera | Print yourself, settings below |
-| **Laptop or PC** with a USB port | Receives the video stream and saves still photos (e.g. via Photo Booth on macOS or the Windows Camera app) | Any |
+| **Windows PC** | Runs the camera's bundled capture software (Windows only — Hikvision does not ship a macOS build) | Any |
 
 ## Printing the base
 
@@ -42,14 +42,14 @@ replication.
 
 ## Assembly
 
-1. Plug the Hikvision camera into your laptop via USB; verify it shows up
-   as a standard webcam.
+1. Plug the Hikvision camera into a Windows PC via USB and start its
+   bundled capture software.
 2. Set the 3D-printed base on a flat dark surface, directly under the
    camera's downward arm. Centre it so the petri-dish recess is in frame.
 3. Slide a 90 mm petri dish into the recess (through the front cutout or
    drop it in from above).
-4. Take a top-down still using your OS's camera app. Repeat for each plate.
-   The base + camera arm together guarantee identical framing across photos.
+4. Capture a top-down still. Repeat for each plate — the base + camera arm
+   together guarantee identical framing across photos.
 
 Once everything is in position the camera arm and base shouldn't move — that
 constant framing is what lets WeCFU treat every photo the same way.
