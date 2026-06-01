@@ -1,218 +1,103 @@
-# 把 WeCFU 同步给协作者
+# 分发 WeCFU 给协作者
 
-## ✅ 已发布：Hugging Face Space（最简单，浏览器直接用）
+三个渠道都已上线。给协作者只需发链接；给维护者（你）下面也有发新版的完整流程。
+
+---
+
+## 给协作者：三种用法
+
+### 1. 网页版（最简单，零安装）
 
 **https://huggingface.co/spaces/WeCFU/wecfu**
 
-发给协作者一行话即可：
-
-> WeCFU 网页版上线了，浏览器打开直接用，无需安装：
+> WeCFU 网页版，浏览器打开直接用，无需安装：
 > https://huggingface.co/spaces/WeCFU/wecfu
-> 把图片拖进去就行。每次会话上限 50 张 / 200 MB，1 小时不动会自动清空。
-> 想要无限制、本地长期用 → 见 INSTALL.md 的 conda 方式。
+> 把图片拖进去就行。每次会话上限 100 张 / 400 MB，1 小时不动会自动清空。
+> 想要无限制、本地长期用 → 用下面的 conda 方式。
 
-下次发新版本同步到 Space：
-```bash
-cd ~/claude_code_workspace/WeF/WeCFU
-# 改完代码并 git commit 到 main 后：
-git checkout hf-deploy
-git merge main -X theirs    # 把 main 最新代码合进 hf-deploy；冲突用 main 的
-cp README_HF.md README.md   # 保持 frontmatter
-git add README.md && git commit -q -m "sync from main"
-git push hf hf-deploy:main
-git checkout main
-```
+### 2. 本地 conda
 
----
+**https://anaconda.org/WeStrainGroup/wecfu**
 
-## ✅ 已发布：WeStrainGroup anaconda channel
-
-`wecfu` 0.1.0 已 push 到 https://anaconda.org/WeStrainGroup/wecfu 。
-**协作者一行 conda install 即可：**
-
-```bash
-conda create -n wecfu -c westraingroup -c conda-forge wecfu -y
-conda activate wecfu
-wecfu serve
-```
-
-发给协作者的话术（直接复制粘贴）：
-
-> WeCFU 已发到我们组的 conda channel。装上 conda 后跑这一行就能用：
+> 装上 conda（Windows 用 Anaconda Prompt）后两行搞定：
 > ```bash
-> conda create -n wecfu -c westraingroup -c conda-forge wecfu -y && conda activate wecfu && wecfu serve
+> conda install westraingroup::wecfu
+> wecfu serve
 > ```
-> 浏览器会自动开 http://127.0.0.1:8765 。用法看仓库里的 USAGE.md。
+> 浏览器自动开 http://127.0.0.1:8765 。详细用法看仓库 USAGE.md。
 
-下次发新版本，本地：
+### 3. GitHub 源码
 
-```bash
-cd ~/claude_code_workspace/WeF/WeCFU
-# 改完代码、commit
-# 把 meta.yaml 里 version 从 0.1.0 → 0.1.1
-conda build . -c conda-forge --no-anaconda-upload
-anaconda login --username westraingroup    # 密码：见你保存的笔记
-anaconda upload ~/miniconda3/conda-bld/noarch/wecfu-0.1.1-py_0.conda
-```
+**https://github.com/WeStrainGroup/WeCFU**
 
----
-
-## 备选：其它分发渠道
-
-按"协作者麻烦程度从低到高"列出 3 条备选路。
-
----
-
-## 路 A：通过 GitHub 仓库分发（适合愿意改代码的协作者）
-
-**优点**：协作者一句 `git clone` 拿全套；你以后改了代码 `git push` 一键同步；自带版本号。
-**缺点**：需要你先把仓库推上 GitHub（10 分钟）。
-
-### 你要做的：
-
-跟着 `GITHUB_SETUP.md` 走三步，把本地仓库推上去。结束后再做一件事——发个 release，把预编译的 wheel 挂上去：
-
-```bash
-cd ~/claude_code_workspace/WeF/WeCFU
-gh release create v0.1.0 \
-  dist/wecfu-0.1.0-py3-none-any.whl \
-  dist/wecfu-0.1.0.tar.gz \
-  --title "WeCFU v0.1.0 — first internal release" \
-  --notes "First internal test release for the WeF culturomics team. See USAGE.md."
-```
-
-### 给协作者的一段话（直接发给他们）：
-
-> WeCFU 已发布，地址：https://github.com/你的用户名/WeCFU
->
-> 安装：
 > ```bash
-> git clone https://github.com/你的用户名/WeCFU.git
+> git clone https://github.com/WeStrainGroup/WeCFU.git
 > cd WeCFU
 > conda env create -f environment.yml
 > conda activate wecfu
 > pip install -e .
 > wecfu serve
 > ```
-> 详细用法看 USAGE.md。
-
-仓库公开还是私有都行：
-- 公开：直接发链接就能用
-- 私有：协作者得登录 GitHub，且你要在 Settings → Collaborators 里加他
 
 ---
 
-## 路 B：直接传文件（最快，不依赖 GitHub）
+## 给维护者：发一个新版本
 
-**优点**：5 分钟搞定；协作者完全不用碰 git。
-**缺点**：你以后改了代码得重新打包发一次。
+每次改完代码，按这套流程把版本同步到全部三处。把 `<版本>` 换成新版本号（例如 `1.0.8`）。
 
-### 你要做的：
-
-打一个分发包（zip）：
+### 第 0 步：改版本号 + 提交
 
 ```bash
 cd ~/claude_code_workspace/WeF/WeCFU
-mkdir -p /tmp/WeCFU-v0.1.0
-cp dist/wecfu-0.1.0-py3-none-any.whl  /tmp/WeCFU-v0.1.0/
-cp environment.yml USAGE.md INSTALL.md README.md LICENSE  /tmp/WeCFU-v0.1.0/
-( cd /tmp && zip -r WeCFU-v0.1.0.zip WeCFU-v0.1.0 )
-ls -lh /tmp/WeCFU-v0.1.0.zip
+# 三个文件的 version 一起改成 <版本>：
+#   wecfu/__init__.py   pyproject.toml   meta.yaml
+git add -A && git commit -m "v<版本>: 改了什么的简短说明"
 ```
 
-得到一个 ~50 KB 的 zip。通过微信 / 邮件 / 网盘发给协作者。
-
-### 给协作者的一段话：
-
-> 收到 WeCFU-v0.1.0.zip 后，解压并执行：
-> ```bash
-> cd WeCFU-v0.1.0
-> conda env create -f environment.yml
-> conda activate wecfu
-> pip install wecfu-0.1.0-py3-none-any.whl
-> wecfu serve
-> ```
-> 浏览器会自动开 http://127.0.0.1:8765。
-> 用法看 USAGE.md。
-
----
-
-## 路 C：真正的 conda 包 + Anaconda 私有 channel（最重，团队大才值得）
-
-**优点**：协作者一行 `conda install` 就齐了，不用 pip。
-**缺点**：要写 `meta.yaml`、注册 anaconda.org、用 `conda-build` 构建。
-
-只有协作者超过 5 人 + 长期维护时才推荐做。**当前阶段不建议走这条**——投资回报不划算。
-
-骨架（如果将来真要做）：
+### 第 1 步：GitHub（main + release）
 
 ```bash
-conda install -n base conda-build anaconda-client -c conda-forge
-mkdir conda-recipe && cat > conda-recipe/meta.yaml <<'EOF'
-{% set version = "0.1.0" %}
-package:
-  name: wecfu
-  version: {{ version }}
-source:
-  path: ..
-build:
-  script: "{{ PYTHON }} -m pip install . -vv"
-  noarch: python
-  entry_points:
-    - wecfu = wecfu.cli:main
-requirements:
-  host:
-    - python >=3.10
-    - pip
-    - setuptools
-  run:
-    - python >=3.10
-    - numpy
-    - scipy
-    - scikit-image
-    - opencv
-    - pillow
-    - pandas
-    - fastapi
-    - uvicorn
-    - python-multipart
-about:
-  license: MIT
-  summary: "WeCFU — hybrid OpenCV + SAM CFU counter for culturomics plate photos"
-EOF
-conda build conda-recipe -c conda-forge
-# 上传到你自己的 anaconda.org channel
-anaconda upload /path/from/conda-build/output.tar.bz2
+python -m build                       # 产出 dist/wecfu-<版本>-py3-none-any.whl + .tar.gz
+git push github main
+gh release create v<版本> dist/wecfu-<版本>-py3-none-any.whl dist/wecfu-<版本>.tar.gz \
+    --title "v<版本>" --notes "改了什么"
 ```
 
-协作者：
+### 第 2 步：conda channel
+
 ```bash
-conda install -c 你的用户名 wecfu
+conda build . -c conda-forge --no-anaconda-upload
+anaconda login --username westraingroup           # 用户名必须小写；密码见你保存的笔记
+anaconda upload ~/miniconda3/conda-bld/noarch/wecfu-<版本>-py_0.conda
+anaconda logout
 ```
 
----
+### 第 3 步：Hugging Face Space
 
-## 我的建议
+HF 的 pre-receive hook 会扫整段 git 历史并拒绝大二进制文件，所以 **hf-deploy 分支不能含 `hardware/`**（里面有实拍大图）。用这套"从 hf 当前状态重建"的流程，绕过历史污染：
 
-**先走路 B**（直传 zip），下午就能让协作者跑起来。
-**等真的稳定下来**（一两周后），再走路 A 上 GitHub 做正式版本管理。
-**路 C 暂时跳过。**
+```bash
+git fetch hf
+git checkout hf-deploy
+git reset --hard hf/main
+# 把 main 的最新内容覆盖进来，但排除 hardware/
+git checkout main -- $(git ls-tree -r --name-only main | grep -v '^hardware/')
+cp README_HF.md README.md             # HF 需要带 frontmatter 的 README
+git add -A && git commit -m "v<版本> (hf-deploy)"
+git push hf hf-deploy:main
+git checkout main
+```
+
+HF 自动重新构建，约 2–3 分钟。
+
+> 纯文档改动（只动仓库根的 .md，不动 `wecfu/` 代码）可以跳过第 2 步——conda 包里不含这些文件，版本号也不必动。
 
 ---
 
 ## 协作者那边的常见坑
 
-- **`zsh: command not found: wecfu`**
-  → 没 `conda activate wecfu`，先激活环境。
-
-- **`opencv` 装失败**
-  → 用 conda 装的（`environment.yml` 里的 `opencv` 走 conda-forge），不要用 pip 装 `opencv-python`，跨平台 wheel 偶尔翻车。
-
-- **macOS 弹"无法打开来自身份不明的开发者"**
-  → 这个工具是 Python 包不是 .app，不会弹。如果弹了说明协作者装错东西了。
-
-- **Windows 用户**
-  → 当前未测。让他们装 WSL2 + Ubuntu，照 Linux 路子来；或者等我们后续测了再说。
-
-- **协作者数完想把结果发回来**
-  → 让他们点 GUI 顶部 **「导出打包」** → 得到一个 `cfu_<批次>.zip`，发给你即可。zip 里 `detections/*.json` 完整保存了他们的每一次点击，你拿来可以接着审或合并。
+- **`command not found: wecfu`** → 忘了 `conda activate wecfu`。
+- **`opencv` 装失败** → 用 conda 装（`environment.yml` 里的 `opencv` 走 conda-forge），别用 pip 的 `opencv-python`。
+- **Windows** → 已支持。在「Anaconda Prompt」里跑（不是 cmd / PowerShell）。导入图片用拖拽最稳。
+- **macOS 弹"身份不明的开发者"** → 这是 Python 包不是 .app，不会弹；弹了说明装错东西。
+- **协作者想把结果发回来** → 让他点顶部 **「Export bundle」** 得到 zip（CSV + 标注图 + 每张图 JSON 状态档），发给你即可，你能接着审或合并。

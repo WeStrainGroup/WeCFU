@@ -10,7 +10,7 @@
 1. 浏览器打开 https://github.com/new
 2. **Owner**：选你自己（或者你想放的组织）
 3. **Repository name**：建议填 `WeCFU`
-4. **Description**（可选）：`Hybrid OpenCV + SAM colony counter with a local web GUI for culturomics plate photos.`
+4. **Description**（可选）：`A friendly, interactive, web-based colony counter for petri dish photos.`
 5. **Visibility**：
    - 想让协作者公开看到 → **Public**
    - 只在小组里分享 → **Private**（之后到 Settings → Collaborators 里加人）
@@ -93,21 +93,19 @@ WeCFU serve
 如果想让协作者**不用 clone 仓库**也能装：
 
 ```bash
-# 在本地已经构建好的 wheel 路径：
-ls dist/
-# wecfu-0.1.0-py3-none-any.whl
-# wecfu-0.1.0.tar.gz
+# 先构建（把 <版本> 换成 pyproject.toml 里的 version，例如 1.0.7）
+python -m build          # 产出 dist/wecfu-<版本>-py3-none-any.whl + .tar.gz
 
 # 用 gh 创建一个 release 并附上 wheel
-gh release create v0.1.0 dist/wecfu-0.1.0-py3-none-any.whl dist/wecfu-0.1.0.tar.gz \
-    --title "v0.1.0 — first internal release" \
-    --notes "Internal test release for the WeF culturomics team. See USAGE.md."
+gh release create v<版本> dist/wecfu-<版本>-py3-none-any.whl dist/wecfu-<版本>.tar.gz \
+    --title "v<版本>" \
+    --notes "See USAGE.md."
 ```
 
 发布完，协作者就能直接：
 
 ```bash
-pip install https://github.com/你的用户名/WeCFU/releases/download/v0.1.0/wecfu-0.1.0-py3-none-any.whl
+pip install https://github.com/你的用户名/WeCFU/releases/download/v<版本>/wecfu-<版本>-py3-none-any.whl
 ```
 
 ---

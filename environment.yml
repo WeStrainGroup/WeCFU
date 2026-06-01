@@ -14,5 +14,3 @@ dependencies:
   - uvicorn
   - python-multipart
   - pytest
-# SAM (segment-anything + torch) is OPTIONAL and installed lazily on first use.
-# Run: pip install segment-anything torch    # ~2 GB, only needed for dense plates
