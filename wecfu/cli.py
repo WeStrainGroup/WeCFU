@@ -70,9 +70,13 @@ def _cmd_web(args) -> int:
 
     from .server.web import build_web_app
 
+    import tempfile
+
     sessions_root = Path(
         args.sessions_root
-        or os.environ.get("WECFU_SESSIONS_ROOT", "/tmp/wecfu_sessions")
+        or os.environ.get("WECFU_SESSIONS_ROOT")
+        # Cross-platform temp dir: /tmp on Unix, %TEMP% on Windows.
+        or (Path(tempfile.gettempdir()) / "wecfu_sessions")
     ).expanduser().resolve()
 
     app = build_web_app(sessions_root)
@@ -114,7 +118,7 @@ def main() -> int:
         "--sessions-root",
         default=None,
         help="root dir for per-session workspaces "
-             "(default: $WECFU_SESSIONS_ROOT or /tmp/wecfu_sessions)",
+             "(default: $WECFU_SESSIONS_ROOT or <tempdir>/wecfu_sessions)",
     )
     pw.add_argument("--host", default="0.0.0.0",
                     help="bind host (default: 0.0.0.0 — for containers)")

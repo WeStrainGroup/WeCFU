@@ -125,6 +125,24 @@ def _params_from_body(body: Optional[ParamsBody]) -> SegmentParams:
     )
 
 
+def _link_or_copy(src: Path, target: Path) -> bool:
+    """Make `target` point at / contain `src`. Returns True if it created
+    a new entry, False if it already existed.
+
+    Prefers a symlink (instant, zero disk) but falls back to a real copy
+    when symlinks aren't permitted — most importantly on Windows, where
+    os.symlink needs Administrator rights or Developer Mode. Either way
+    the user's original file is never modified.
+    """
+    if target.exists():
+        return False
+    try:
+        target.symlink_to(src)
+    except (OSError, NotImplementedError):
+        shutil.copy2(src, target)
+    return True
+
+
 def _count_images(root: Path) -> int:
     """How many images are currently stored under this workspace (across all batches)."""
     inputs = root / "inputs"
@@ -217,16 +235,12 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
             if not src.exists():
                 continue
             if src.is_file() and src.suffix.lower() in _IMG_EXTS:
-                target = dst / src.name
-                if not target.exists():
-                    target.symlink_to(src)
+                if _link_or_copy(src, dst / src.name):
                     n += 1
             elif src.is_dir():
                 for f in src.rglob("*"):
                     if f.is_file() and f.suffix.lower() in _IMG_EXTS:
-                        target = dst / f.name
-                        if not target.exists():
-                            target.symlink_to(f)
+                        if _link_or_copy(f, dst / f.name):
                             n += 1
         return {"batch": batch, "linked": n}
 

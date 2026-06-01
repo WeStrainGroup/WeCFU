@@ -4,7 +4,7 @@
 
 打开 **https://huggingface.co/spaces/WeCFU/wecfu**，把图片拖进去就行。
 
-适合临时计数 / 偶尔用一次。单次会话上限 **50 张图 / 200 MB**，1 小时不动会自动清空。
+适合临时计数 / 偶尔用一次。单次会话上限 **100 张图 / 400 MB**，1 小时不动会自动清空。
 长期使用、大批量、或想要完全离线 → 用下面的本地安装方式。
 
 ---
@@ -19,7 +19,17 @@ wecfu serve
 
 完成。浏览器会自动开 http://127.0.0.1:8765 。详细用法见 [USAGE.md](USAGE.md)。
 
-> 想要 SAM 兜底（处理密集板）？激活环境后再 `pip install segment-anything torch` 并按 USAGE 5.1 节下载权重。
+### Windows 用户
+
+命令**完全一样**，只是入口不同：
+
+1. 装 [Miniconda for Windows](https://docs.conda.io/projects/miniconda/en/latest/)（一路 Next 即可）。
+2. 开始菜单里打开 **「Anaconda Prompt」**（不是 cmd / PowerShell —— 用这个 conda 才在 PATH 上）。
+3. 在 Anaconda Prompt 里粘上面那三行，回车。`wecfu serve` 跑起来后浏览器自动打开 http://127.0.0.1:8765 。
+
+> Windows 上推荐用**拖拽**导入图片（把文件或文件夹拖到网页左侧）。「Ingest path」粘路径的方式也能用——v1.0.7 起，当 Windows 不允许创建符号链接时会自动退化成复制，不再报错。
+
+macOS / Linux 用「终端 Terminal」，命令同上。
 
 ---
 
