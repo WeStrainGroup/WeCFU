@@ -22,7 +22,7 @@ https://huggingface.co/organizations/new ，名字建议填 `WeStrainGroup` 保�
 1. 打开 https://huggingface.co/new-space
 2. **Owner**：你自己 或 WeStrainGroup
 3. **Space name**：`wecfu`（小写）
-4. **License**：`mit`
+4. **License**：`cc-by-nc-sa-4.0`
 5. **Select the Space SDK**：选 **Docker**，然后下面的"Choose a Docker template"选 **Blank**
 6. **Hardware**：保持默认 **CPU basic - 2 vCPU / 16 GB RAM / Free**
 7. **Visibility**：Public（也可以选 Private，但 Private 别人就要登录 HF 才能看）

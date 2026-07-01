@@ -6,7 +6,7 @@ colorTo: green
 sdk: docker
 app_port: 7860
 pinned: false
-license: mit
+license: cc-by-nc-sa-4.0
 short_description: Friendly web colony counter for petri-dish photos
 ---
 

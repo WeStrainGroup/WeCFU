@@ -1,5 +1,5 @@
 {% set name = "wecfu" %}
-{% set version = "1.0.7" %}
+{% set version = "1.1.0" %}
 
 package:
   name: {{ name|lower }}
@@ -50,7 +50,7 @@ test:
 
 about:
   home: https://github.com/WeStrainGroup/WeCFU
-  license: MIT
+  license: CC-BY-NC-SA-4.0
   license_file: LICENSE
   summary: "WeCFU — a friendly, interactive, web-based colony counter for petri dish photos"
   description: |

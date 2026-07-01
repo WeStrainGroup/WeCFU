@@ -145,4 +145,11 @@ WeCFU/
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**CC BY-NC-SA 4.0** (Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International) — see [LICENSE](LICENSE) or
+<https://creativecommons.org/licenses/by-nc-sa/4.0/>.
+
+Free to use, share, and adapt for **academic and other non-commercial**
+purposes, with attribution; any adaptations must be released under the same
+license. **Commercial use requires separate written permission** from the
+authors.
