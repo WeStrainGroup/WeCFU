@@ -57,8 +57,10 @@ def test_linux_exited_child_requires_bounded_exit_confirmation():
             clock=mock.Mock(side_effect=[0.,0.,0.])
             result=process_monitor.resolve_exit_race(caught.value,lambda:True,1.,clock=clock,sleep=lambda _:None)
             assert result['confirmed_exit'] and result['wait4_polls']==1
+    # State may still be R/S while exit_mm has released RSS. This does not
+    # itself establish exit: the same-child bounded confirmation remains due.
     with mock.patch.object(process_monitor.sys,'platform','linux'), mock.patch.object(Path,'read_text',return_value='Name: child\nState:\tR (running)\n'):
-        with pytest.raises(ValueError):monitor.resident_bytes()
+        with pytest.raises(process_monitor.LinuxRSSUnavailable):monitor.resident_bytes()
 
 
 def test_windows_core_imports_without_resource_and_models_fail_before_spawn():

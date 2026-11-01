@@ -45,7 +45,17 @@ class TaskInfo(ctypes.Structure):
         'virtual_size', 'resident_size', 'total_user', 'total_system', 'threads_user', 'threads_system')]
     _fields_ += [(name, ctypes.c_int32) for name in (
         'policy', 'faults', 'pageins', 'cow_faults', 'messages_sent', 'messages_received',
-        'syscalls_mach', 'syscalls_unix', 'csw', 'threadnum', 'numrunning', 'priority')]
+            'syscalls_mach', 'syscalls_unix', 'csw', 'threadnum', 'numrunning', 'priority')]
+
+
+class LinuxRSSUnavailable(OSError):
+    """Linux can release its address space before changing State to Z.
+
+    This is only an invitation to the bounded same-child wait4 check, never
+    evidence of successful exit. A still-live child remains a monitor failure.
+    """
+    def __init__(self):
+        super().__init__(errno.ESRCH, 'own Linux child has no resident sample; confirm exit')
 
 
 class OwnChildRSS:
@@ -71,11 +81,11 @@ class OwnChildRSS:
             for line in lines:
                 if line.startswith('VmRSS:'):
                     value=int(line.split()[1])*1024
+                    if value == 0:
+                        raise LinuxRSSUnavailable()
                     require(value>0,'invalid Linux resident sample')
                     return value
-            if any(line.startswith('State:') and line.split()[1] in ('Z','X') for line in lines):
-                raise OSError(errno.ESRCH, 'own child exited without a resident sample')
-            raise ValueError('Linux resident sample unavailable')
+            raise LinuxRSSUnavailable()
         info = TaskInfo()
         ctypes.set_errno(0)
         size = self.call(self.child.pid, 4, 0, ctypes.byref(info), ctypes.sizeof(info))
