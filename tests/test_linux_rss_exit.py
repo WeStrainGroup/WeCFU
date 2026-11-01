@@ -8,16 +8,18 @@ from wecfu.server.fusion_dino import process_monitor as monitor
 
 
 @pytest.mark.parametrize('status',['State:\tR (running)\n','State:\tS (sleeping)\nVmRSS:\t0 kB\n'])
-def test_only_absent_or_zero_linux_rss_enters_exit_confirmation(status):
+@pytest.mark.parametrize('platform,polls',[('linux',101),('darwin',11)])
+def test_only_absent_or_zero_linux_rss_enters_exit_confirmation(status,platform,polls):
     instance=object.__new__(monitor.OwnChildRSS)
     instance.child=mock.Mock(pid=123,returncode=None)
     with mock.patch.object(monitor.sys,'platform','linux'),mock.patch.object(Path,'read_text',return_value=status):
         with pytest.raises(monitor.LinuxRSSUnavailable) as caught:instance.resident_bytes()
     assert caught.value.errno==errno.ESRCH
-    confirmed=monitor.resolve_exit_race(caught.value,lambda:True,1.,clock=lambda:0.,sleep=lambda _:None)
-    assert confirmed['confirmed_exit'] and confirmed['wait4_polls']==1
-    live=monitor.resolve_exit_race(caught.value,lambda:False,1.,clock=lambda:0.,sleep=lambda _:None)
-    assert not live['confirmed_exit'] and live['wait4_polls']==monitor.EXIT_RACE_POLLS
+    with mock.patch.object(monitor.sys,'platform',platform):
+        confirmed=monitor.resolve_exit_race(caught.value,lambda:True,1.,clock=lambda:0.,sleep=lambda _:None)
+        assert confirmed['confirmed_exit'] and confirmed['wait4_polls']==1
+        live=monitor.resolve_exit_race(caught.value,lambda:False,1.,clock=lambda:0.,sleep=lambda _:None)
+    assert not live['confirmed_exit'] and live['wait4_polls']==polls
 
 
 @pytest.mark.parametrize('status',['VmRSS:\tgarbage kB\n','VmRSS:\t-1 kB\n','VmRSS:\n'])

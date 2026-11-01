@@ -17,7 +17,7 @@ FILTER=HERE/'fusion_filter_v2.json'
 WORKER=HERE/'fusion_worker_v2.py'
 FILTER_SHA256='7542a3b5f3bfe28e7077ee478b944044daf56246a463ec8e9507209ea4c42570'
 MODEL_SHA256='fc7ab851da6d09daf36bc49ac1d6e2aec52a6a04f982c588017704805f638209'
-DETECTOR_CONTRACT_SHA256='bef29f4c9f50d9d783655c431b4aa401c68e23399950c2e91779f4d857e4dbc5'
+DETECTOR_CONTRACT_SHA256='d63350bf0033776eb13a519a717d4dd7ade08eed552d20ccc393e8c663b21275'
 SOURCE_FILES=('fusion_worker_v2.py','fusion_dino/fusion_math_v2.py',
               'fusion_dino/fusion_math.py','fusion_dino/appearance_runtime.py')
 RuntimeUnavailable=sam_runtime.RuntimeUnavailable

@@ -54,7 +54,7 @@ def test_linux_exited_child_requires_bounded_exit_confirmation():
         with mock.patch.object(process_monitor.sys,'platform','linux'), mock.patch.object(Path,'read_text',return_value=f'Name: child\nState:\t{state} (exited)\n'):
             with pytest.raises(OSError) as caught:monitor.resident_bytes()
             assert caught.value.errno==errno.ESRCH
-            clock=mock.Mock(side_effect=[0.,0.,0.])
+            clock=lambda:0.
             result=process_monitor.resolve_exit_race(caught.value,lambda:True,1.,clock=clock,sleep=lambda _:None)
             assert result['confirmed_exit'] and result['wait4_polls']==1
     # State may still be R/S while exit_mm has released RSS. This does not

@@ -32,6 +32,8 @@ MODES = {'normal', 'allocate', 'sleep', 'stdout', 'stderr', 'exit0', 'exit1', 'b
 EXIT_RACE_SECONDS = .05
 EXIT_RACE_POLLS = 11
 EXIT_RACE_POLL_SECONDS = .005
+LINUX_RSS_EXIT_RACE_SECONDS = .5
+LINUX_RSS_EXIT_RACE_POLLS = 101
 
 
 def require(ok, message):
@@ -110,20 +112,27 @@ def cpu_limit(requested):
 
 
 def resolve_exit_race(exc, reap, wall_deadline, *, clock=time.monotonic, sleep=time.sleep):
-    """Only ESRCH may await a *confirmed* own-child exit, for a fixed short interval."""
+    """Confirm own-child exit within a fixed window and the original wall deadline."""
     start = clock()
     record = {'errno': getattr(exc, 'errno', None), 'wait4_polls': 0,
               'confirmed_exit': False, 'elapsed_seconds': 0.0}
     if not isinstance(exc, OSError) or exc.errno != errno.ESRCH:
         return record
-    deadline = min(wall_deadline, start + EXIT_RACE_SECONDS)
-    for attempt in range(EXIT_RACE_POLLS):
+    if start >= wall_deadline:
+        return record
+    linux_rss = sys.platform == 'linux' and isinstance(exc, LinuxRSSUnavailable)
+    seconds = LINUX_RSS_EXIT_RACE_SECONDS if linux_rss else EXIT_RACE_SECONDS
+    polls = LINUX_RSS_EXIT_RACE_POLLS if linux_rss else EXIT_RACE_POLLS
+    deadline = min(wall_deadline, start + seconds)
+    for attempt in range(polls):
+        if clock() > deadline:
+            break
         record['wait4_polls'] += 1
         if reap():
-            record['confirmed_exit'] = True
+            record['confirmed_exit'] = clock() <= deadline
             break
         now = clock()
-        if now >= deadline or attempt + 1 == EXIT_RACE_POLLS:
+        if now >= deadline or attempt + 1 == polls:
             break
         sleep(min(EXIT_RACE_POLL_SECONDS, deadline - now))
     record['elapsed_seconds'] = clock() - start

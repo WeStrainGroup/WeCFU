@@ -7,7 +7,7 @@
   "model_sha256": "fc7ab851da6d09daf36bc49ac1d6e2aec52a6a04f982c588017704805f638209",
   "sam_model_sha256": "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
   "dino_model_sha256": "af2e3769e6f1512f4dabb3043b6b4a5de97935549eaa843bfa3074728ce630ea",
-  "detector_contract_sha256": "bef29f4c9f50d9d783655c431b4aa401c68e23399950c2e91779f4d857e4dbc5",
+  "detector_contract_sha256": "d63350bf0033776eb13a519a717d4dd7ade08eed552d20ccc393e8c663b21275",
   "source_files_sha256": {
     "fusion_worker_v2.py": "b7812b38e04fb056b8dd8eab684000a04bafdc7af844014fc8da7e76ce53bd40",
     "fusion_dino/fusion_math_v2.py": "904629d7eeced7de8dd063a616095254fb9f86ee1032873fd1f3d3736542f526",
