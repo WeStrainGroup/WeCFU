@@ -2,6 +2,8 @@ import json
 from io import StringIO
 from unittest.mock import patch
 
+import pytest
+
 from wecfu.server import runtime_diagnostics as diagnostics
 
 
@@ -21,7 +23,8 @@ def test_safe_summary_reports_worker_cause_and_numeric_resource():
     actual=diagnostics.safe_log_summary(value)
     assert actual['reason_codes']==['dino_access_guard','dino_worker_failure']
     assert actual['worker_errors']==[{'log':'dino/logs.json','error_type':'RuntimeError'}]
-    assert actual['resources']==dict(outcome='child_failed',returncode=1,elapsed_seconds=4.2,wait4_peak_resident_bytes=123456)
+    assert actual['resources']==dict(outcome='child_failed',returncode=1,elapsed_seconds=4.2,
+        wait4_peak_resident_bytes=123456,error={'category':'other','errno':None})
     assert 'private' not in json.dumps(actual)
 
 
@@ -81,3 +84,74 @@ def test_static_loading_guards_can_be_distinguished_without_argument_values():
         'ValueError: unknown initial global; stop: PrivateName\n'}}))
     assert 'unexpected_safe_global' in actual['reason_codes']
     assert 'PrivateName' not in json.dumps(actual)
+
+
+def resource_summary(resource):
+    return diagnostics.safe_log_summary(example(log_tails={
+        'dino/resource.json':{'tail_utf8':json.dumps(resource)}}))['resources']
+
+
+def test_exit_confirmation_failure_remains_distinct_from_final_normal_exit():
+    resource={'outcome':'monitor_unavailable','returncode':0,'work_authorized':True,
+        'error':"LinuxRSSUnavailable(3, 'own Linux child has no resident sample; confirm exit')",
+        'resident_samples':9801,'instantaneous_RSS_hard_limit':False,
+        'sampling_overshoot_possible':True,'descendant_or_GPU_resources_monitored':False,
+        'exit_race_checks':[{'errno':3,'wait4_polls':11,'confirmed_exit':False,
+                             'elapsed_seconds':.0501}]}
+    actual=resource_summary(resource)
+    assert actual['outcome']=='monitor_unavailable' and actual['returncode']==0
+    assert actual['error']=={'category':'LinuxRSSUnavailable','errno':3}
+    assert actual['exit_race_checks']==resource['exit_race_checks']
+    assert actual['exit_race_checks_count']==1
+    for key in ('work_authorized','resident_samples','instantaneous_RSS_hard_limit',
+                'sampling_overshoot_possible','descendant_or_GPU_resources_monitored'):
+        assert actual[key]==resource[key]
+
+
+@pytest.mark.parametrize('error,category,number',[
+    ("ProcessLookupError(3, '/private/person.png')",'ProcessLookupError',3),
+    ("PermissionError(13, '/private/person.png')",'PermissionError',13),
+    ("OSError(5, '/private/person.png')",'OSError',5),
+    ("ValueError('invalid Linux resident sample /private/person.png')",'ValueError',None),
+    ("IndexError('/private/person.png')",'IndexError',None),
+    ("PrivatePatientError('/private/person.png')",'other',None),
+    ("PermissionError(True, '/private/person.png')",'PermissionError',None),
+    ("OSError(99999, '/private/person.png')",'OSError',None),
+])
+def test_resource_error_classification_never_forwards_arguments(error,category,number):
+    actual=resource_summary({'error':error})
+    assert actual=={'error':{'category':category,'errno':number}}
+    assert all(secret not in json.dumps(actual) for secret in ('private','person.png','PrivatePatient'))
+
+
+def test_exit_race_records_enforce_field_types_and_bound_output():
+    rows=[{'errno':True,'wait4_polls':False,'confirmed_exit':1,'elapsed_seconds':float('nan'),
+           'filename':'/private/person.png'},
+          {'errno':13,'wait4_polls':0,'confirmed_exit':False,'elapsed_seconds':0,
+           'error':'PrivatePatient'},
+          {'errno':-1,'wait4_polls':1025,'confirmed_exit':'False','elapsed_seconds':-1}]
+    actual=resource_summary({'exit_race_checks':rows})
+    assert actual=={'exit_race_checks':[{'errno':13,'wait4_polls':0,
+        'confirmed_exit':False,'elapsed_seconds':0}],'exit_race_checks_count':3}
+    actual=resource_summary({'exit_race_checks':[rows[1]]*20})
+    assert len(actual['exit_race_checks'])==16 and actual['exit_race_checks_count']==20
+    assert 'PrivatePatient' not in json.dumps(actual)
+    assert resource_summary({'exit_race_checks':'PrivatePatient','error':{'secret':'person'},
+        'work_authorized':1,'resident_samples':True,'sampling_overshoot_possible':'true'})=={}
+
+
+def test_preserve_failure_logs_safe_resource_fields_but_retains_local_error(tmp_path,capsys):
+    logs=tmp_path/'worker';(logs/'dino').mkdir(parents=True)
+    raw={'outcome':'monitor_unavailable','returncode':0,'work_authorized':True,
+         'error':"PermissionError(13, '/private/PrivatePatient.png')",'exit_race_checks':[]}
+    (logs/'dino/resource.json').write_text(json.dumps(raw))
+    with patch.object(diagnostics,'ROOT',tmp_path/'diagnostics'):
+        identifier=diagnostics.preserve_failure(ValueError('single-image resource/runtime failure'),
+            phase='fusion-dino',folder=logs)
+    emitted=capsys.readouterr().err.splitlines()
+    assert len(emitted)==1 and 'PrivatePatient' not in emitted[0]
+    safe=json.loads(emitted[0].split(' ',1)[1])
+    assert safe['resources']['error']=={'category':'PermissionError','errno':13}
+    assert safe['resources']['exit_race_checks']==[]
+    saved=json.loads((tmp_path/'diagnostics'/f'{identifier}.json').read_text())
+    assert json.loads(saved['log_tails']['dino/resource.json']['tail_utf8'])==raw

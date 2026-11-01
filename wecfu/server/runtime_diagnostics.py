@@ -43,6 +43,42 @@ _OUTCOMES={'success','monitor_unavailable','wall_limit','rss_limit','output_limi
            'wall_limit_after_exit','child_failed','parent_budget'}
 _NUMERIC=('returncode','elapsed_seconds','sampled_peak_rss_bytes','sampled_peak_resident_bytes',
           'wait4_peak_resident_bytes','child_CPU_seconds','output_bytes_observed','output_bytes_retained')
+_RESOURCE_ERRORS={'LinuxRSSUnavailable','OSError','ProcessLookupError','FileNotFoundError',
+                  'PermissionError','ValueError','TypeError','IndexError','ChildProcessError'}
+_ERRNO_ERRORS=_RESOURCE_ERRORS-{'ValueError','TypeError','IndexError'}
+_RESOURCE_BOOLS=('work_authorized','instantaneous_RSS_hard_limit',
+                 'sampling_overshoot_possible','descendant_or_GPU_resources_monitored')
+
+
+def _safe_resource_error(error):
+    """Classify our saved repr without forwarding its arguments or free text."""
+    if type(error) is not str:return None
+    match=re.fullmatch(r'([A-Za-z_][A-Za-z_0-9]*)\((.*)\)',error,re.DOTALL)
+    category=match.group(1) if match and match.group(1) in _RESOURCE_ERRORS else 'other'
+    number=None
+    if category in _ERRNO_ERRORS:
+        prefix=re.match(r'([0-9]{1,4})(?:,|$)',match.group(2))
+        if prefix and 0<=int(prefix.group(1))<=4095:number=int(prefix.group(1))
+    return {'category':category,'errno':number}
+
+
+def _safe_exit_races(records):
+    """Bounded numeric/bool evidence only; no exception text or PID is logged."""
+    if type(records) is not list:return None
+    result=[]
+    for record in records[:16]:
+        if type(record) is not dict:continue
+        row={}
+        for key,maximum in (('errno',4095),('wait4_polls',1024)):
+            number=record.get(key)
+            if type(number) is int and 0<=number<=maximum:row[key]=number
+        confirmed=record.get('confirmed_exit')
+        if type(confirmed) is bool:row['confirmed_exit']=confirmed
+        elapsed=record.get('elapsed_seconds')
+        if type(elapsed) in (int,float) and math.isfinite(elapsed) and elapsed>=0:
+            row['elapsed_seconds']=elapsed
+        if row:result.append(row)
+    return result
 
 
 def safe_log_summary(value):
@@ -64,6 +100,17 @@ def safe_log_summary(value):
             for key in _NUMERIC:
                 number=resource.get(key)
                 if type(number) in (int,float) and math.isfinite(number):resources[key]=number
+            error=_safe_resource_error(resource.get('error'))
+            if error is not None:resources['error']=error
+            for key in _RESOURCE_BOOLS:
+                flag=resource.get(key)
+                if type(flag) is bool:resources[key]=flag
+            samples=resource.get('resident_samples')
+            if type(samples) is int and samples>=0:resources['resident_samples']=samples
+            races=_safe_exit_races(resource.get('exit_race_checks'))
+            if races is not None:
+                resources['exit_race_checks']=races
+                resources['exit_race_checks_count']=len(resource['exit_race_checks'])
     except (TypeError,ValueError):pass
     details={key:number for key,number in value.get('details',{}).items()
              if key in _NUMERIC and type(number) in (int,float) and math.isfinite(number)}
