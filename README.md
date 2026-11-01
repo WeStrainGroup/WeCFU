@@ -1,155 +1,95 @@
-# WeCFU
+# WeCFU 1.2.0
 
-Friendly, browser-based **CFU (colony-forming unit) counter** for petri-dish photos.
-Drag images in, get auto-counted plates with each colony numbered, click-review
-(add / delete), then export a CSV.
+A browser workspace for counting colonies on petri-dish photographs, reviewing
+individual markers, and exporting counts with annotated images.
 
-WeCFU is the *software* half of a full imaging pipeline; the *hardware* half —
-an overhead USB camera with integrated lighting plus a 3D-printed petri-dish
-jig — is documented (with the printable model and purchase link) in
-[`hardware/`](hardware/).
+The default automatic workflow uses **Fusion v2**: SAM 2.1 segmentation plus a
+colony Grounding DINO detector and a fixed candidate filter. Custom classical
+image-processing methods and fully manual marking remain available. If the
+selected model cannot run, WeCFU reports the problem; it does not substitute a
+classical count.
 
-## Three ways to use
+## Use online
 
-### 1. Browser, no install ✨
+Open [WeCFU on Hugging Face](https://huggingface.co/spaces/WeCFU/wecfu).
+The container includes the pinned CPU model runtime and verified assets. A cold
+start or model request can take time; keep the page open until it completes.
+Each visitor has a separate temporary workspace, limited to 100 images and
+400 MB. Export your results before leaving: inactive workspaces are removed
+after approximately one hour, and a Space restart can remove them sooner.
 
-**https://huggingface.co/spaces/WeCFU/wecfu**
+Photos uploaded to the hosted app are processed on that server. WeCFU does not
+send them to an external inference API. Local installation keeps processing
+and working files on your computer.
 
-Just open the link. Each visitor gets a private session (≤ 100 images / 400 MB,
-auto-cleaned after 1 h of inactivity).
+## Install locally with Fusion v2
 
-### 2. Local install via conda
+Use a Python 3.12 environment. The Conda package provides the core application;
+the release wheel's `models` extra installs the pinned model runtime.
 
-```bash
-conda install westraingroup::wecfu
+```sh
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 pip wecfu=1.2.0 -y
+conda activate wecfu
+python -m pip install "wecfu[models] @ https://github.com/WeStrainGroup/WeCFU/releases/download/v1.2.0/wecfu-1.2.0-py3-none-any.whl"
+python -m wecfu.setup_models
 wecfu serve
 ```
 
-No image limits, fully offline. Detailed walkthrough in [USAGE.md](USAGE.md);
-other install methods (fresh env, pip wheel, source clone) in
-[INSTALL.md](INSTALL.md).
+Setup downloads about 1.36 GB of fixed model weights, plus source/tokenizer
+files, and verifies their sizes and SHA-256 checksums. Python dependencies
+require additional disk space. Downloads happen during setup, not while a
+photograph is being counted. See [INSTALL.md](INSTALL.md) for Linux CPU wheels,
+core-only installation, offline cache verification and troubleshooting.
 
-### 3. Command line, for batch jobs
+## Review and export
 
-```bash
+1. Import plate photos. Declare whether they show the front of the plate, an
+   empty plate, or the reverse side. Fusion v2 accepts front/empty views;
+   reverse or undeclared views require a different explicitly selected workflow.
+2. Check the detected medium boundary. Choose default automatic recognition,
+   a custom method, or manual marking. Opening a photo alone does not run a model.
+3. Review model candidates before applying them. Add missing colonies, remove
+   incorrect markers, and use undo while reviewing. Model failures leave saved
+   markings unchanged.
+4. Export CSV or a ZIP with the CSV, annotated images and per-image state.
+   Local workspaces persist when `wecfu serve` restarts; web workspaces are
+   temporary. Exported counts reflect your saved corrections.
+
+The light interface includes keyboard navigation, zoom/pan, adjustable marker
+size, default/custom controls and a collapsible export area. Standard keyboard
+shortcuts include Cmd/Ctrl-Z for undo and left/right arrows to change images.
+
+Model output is a proposal for human review. This release does not establish
+accuracy across all organisms, media, imaging setups or growth patterns. Marker
+circles are review aids and should not be treated as exact segmentation outlines.
+
+## Command line
+
+```sh
 wecfu batch /path/to/plate/photos --out /path/to/results
 ```
 
-Produces `results.csv` plus an annotated overlay per image.
+The batch command explicitly uses the classical pipeline. It does not invoke
+Fusion v2 or replace a requested model run.
 
-## Using the GUI
+## Development and releases
 
-- **Drop** image files or a folder onto the left side. Files are uploaded (or
-  symlinked in local mode) — your originals are never modified.
-- **Count all** runs the algorithm on every image. Opening an un-counted image
-  also auto-runs once, so the "drop and click around" flow Just Works.
-- On any image:
-  - **Left-click** empty plate area → add a manual colony (green).
-  - **Right-click** a circle → delete it.
-  - **Cmd / Ctrl-Z** → undo. **← / →** → previous / next image.
-  - **Wheel** → zoom. **Cmd / Ctrl-drag** → pan.
-- Pick a colour **preset** (white / cream / yellow / any), or tune the seven
-  algorithm parameters by hand. Tick **Live threshold preview** to see in real
-  time which pixels are being treated as colonies.
-- Sidebar dot states: **grey** = not counted, **blue** = counted, **green** =
-  viewed or edited.
-- **Export CSV** writes the slim 5-column table; **Export bundle** writes a
-  zip with the CSV, annotated overlay PNGs, and a JSON state file per image.
+- [Installation and operation](INSTALL.md)
+- [Release and deployment procedure](SHARE.md)
+- [Changes in 1.2.0](CHANGELOG.md)
+- [Imaging hardware](hardware/): the previously published camera/jig design
 
-## CSV columns
+Application packages do not contain user photographs, research results, labels,
+workspaces, private model authorization records, or pretrained model weights.
+The public model manifest and fixed filter coefficients are included.
 
-| column | meaning |
-| --- | --- |
-| `filename` | the source image |
-| `total_count` | final colony count after any human edits |
-| `machine_count` | what the algorithm produced on its most recent run |
-| `n_removed` | machine detections the user deleted |
-| `n_added` | manual detections the user added |
-| `notes` | per-image free-text note from the GUI |
+## Authors and license
 
-`total_count = machine_count − n_removed + n_added`.
+Jianghua Zhang (张江华), Xinyu Wang (王欣宇), Wenhao Zhou (周文浩),
+and Zhanyi Zhu (朱展翼).
 
-## Algorithm
-
-A single classical-CV pipeline; no deep-learning dependency, no GPU.
-
-1. **Plate localisation.** `cv2.HoughCircles` on a downsampled grey image,
-   with a largest-circular-contour fallback if Hough finds nothing.
-2. **ROI mask.** Disk of radius `plate_inset · r` (default 0.82) — drops the
-   glass rim and the agar-glass glare ring.
-3. **White-colony gate.** HSV: keep pixels with `V ≥ Min value` (default 200)
-   and `S ≤ Max saturation` (default 60). Bright, near-white colonies pass;
-   yellow agar streaks don't.
-4. **Cleanup.** Morphological open then close to remove specks and fill
-   saturated-highlight holes at colony centres.
-5. **Touching-colony split.** Distance transform + watershed seeded by
-   `peak_local_max` with `min_distance = Peak min distance` (default 15 px).
-6. **Shape filter.** Area ∈ [`Min area frac`, max_area_frac] × plate-area,
-   circularity ≥ `Min circularity` (0.55), solidity ≥ 0.80, eccentricity ≤ 0.88.
-
-All seven parameter names match the GUI labels one-for-one.
-
-## Parameter cheat-sheet
-
-| Slider | Range | When to nudge it |
-| --- | --- | --- |
-| Min value       | 0–255       | Empty plate over-counting? Raise. Real colonies missed? Lower. |
-| Max saturation  | 0–255       | Want to include yellow / orange colonies? Raise. Yellow agar bleed counted? Lower. |
-| Plate inset     | 0–1         | Rim glare counted? Lower (e.g. 0.78). |
-| Min circularity | 0–1         | Tighten to filter irregular debris; loosen to keep oddly-shaped colonies. |
-| Min area frac   | small float | Tiny pinpoint colonies missed? Lower. Specks counted? Raise. |
-| Peak min distance | px        | Touching colonies merged? Lower. One colony split in two? Raise. |
-
-The bottom row of the params bar has two UI helpers that don't affect counts:
-
-| Field | What it does |
-| --- | --- |
-| New colony radius   | Size (in pixels) of the green circle drawn when you left-click to add a manual colony. Visual only. |
-| Live threshold preview | While ticked, the canvas overlays a green tint on every pixel currently passing the `Min value` / `Max saturation` gate, so you can see what the algorithm "sees" before clicking *Apply and recount*. |
-
-## Project layout
-
-```
-WeCFU/
-├── wecfu/
-│   ├── plate.py          # plate detection
-│   ├── segment.py        # CV pipeline
-│   ├── naming.py         # filename metadata parser
-│   ├── pipeline.py       # orchestration
-│   ├── overlay.py        # annotated-image rendering
-│   ├── cli.py            # 'wecfu batch / serve / web' entrypoints
-│   └── server/
-│       ├── app.py        # FastAPI routes (single-user + web mode)
-│       ├── web.py        # per-visitor session middleware (web mode)
-│       └── static/       # vanilla HTML + JS + CSS frontend
-├── hardware/             # 3D-printed petri-dish jig + build notes
-│   ├── README.md
-│   ├── model.3mf
-│   └── preview.png
-├── Dockerfile            # Hugging Face Spaces image
-├── meta.yaml             # conda-build recipe
-├── pyproject.toml        # pip / wheel build
-└── tests/
-```
-
-## Citing
-
-*To be added once the accompanying paper is published.*
-
-## Authors
-
-- Jianghua Zhang (张江华) — `zhangjianghua@westlake.edu.cn`
-- Xinyu Wang (王欣宇) — `wangxinyu30@westlake.edu.cn`
-- Wenhao Zhou (周文浩) — `zhouwenhao@westlake.edu.cn`
-- Zhanyi Zhu (朱展翼) — `zhuzhanyi@westlake.edu.cn`
-
-## License
-
-**CC BY-NC-SA 4.0** (Creative Commons Attribution-NonCommercial-ShareAlike 4.0
-International) — see [LICENSE](LICENSE) or
-<https://creativecommons.org/licenses/by-nc-sa/4.0/>.
-
-Free to use, share, and adapt for **academic and other non-commercial**
-purposes, with attribution; any adaptations must be released under the same
-license. **Commercial use requires separate written permission** from the
-authors.
+WeCFU's original work is licensed under **CC BY-NC-SA 4.0**; see [LICENSE](LICENSE)
+and [NOTICE](NOTICE). Commercial use requires separate permission from the
+copyright holders. Third-party components retain their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Citation information will be
+added when the accompanying publication is available.

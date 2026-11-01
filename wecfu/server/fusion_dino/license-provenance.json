@@ -1,0 +1,10 @@
+{
+  "checkpoint_source": "https://huggingface.co/DataScienceWFSR/ColonyGroundedSAM2/resolve/15b36f32ba3ba39ebd368bb98688bfa46144ac80/checkpoints/colony_gd.pth",
+  "checkpoint_sha256": "af2e3769e6f1512f4dabb3043b6b4a5de97935549eaa843bfa3074728ce630ea",
+  "publisher_license": "Apache-2.0",
+  "publisher_revision": "15b36f32ba3ba39ebd368bb98688bfa46144ac80",
+  "implementation": "Official Transformers 4.57.6 Apache-2.0, independently adapted exact checkpoint mapping; author wrapper not used",
+  "tokenizer_source": "google-bert/bert-base-uncased@86b5e0934494bd15c9632b12f734a8a67f723594",
+  "tokenizer_license": "Apache-2.0",
+  "inference_network": false
+}

@@ -1,8 +1,5 @@
-# Dockerfile for Hugging Face Spaces (Docker SDK).
-# HF runs the container with no extra args; we expose port 7860 (the
-# HF default) and start the multi-visitor web mode.
-
-FROM python:3.12-slim AS base
+# Hugging Face Spaces: build the pinned CPU runtime and verified model cache.
+FROM python:3.12-slim
 
 # OpenCV needs these C libraries even with -headless.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,14 +13,30 @@ ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    WECFU_SESSIONS_ROOT=/tmp/wecfu_sessions
+    WECFU_SESSIONS_ROOT=/tmp/wecfu_sessions \
+    WECFU_MODEL_HOME=/home/user/.cache/wecfu/models \
+    WECFU_SAM_DEVICE=cpu \
+    WECFU_ENABLE_FUSION_V2=1 \
+    SAM2_BUILD_CUDA=0 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
 
 WORKDIR /app
 
-COPY --chown=user pyproject.toml ./
+COPY --chown=user pyproject.toml README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
+COPY --chown=user LICENSES/ ./LICENSES/
 COPY --chown=user wecfu/ ./wecfu/
 
-RUN pip install --user --no-cache-dir .
+RUN python -m pip install --user --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.14.1 torchvision==0.29.1 \
+    && python -m pip install --user --no-cache-dir '.[models]' \
+    && python -m wecfu.setup_models \
+    && python -m wecfu.setup_models --check --runtime-check
+
+# All remote model acquisition happens above. Requests use the local cache.
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 
 EXPOSE 7860
 

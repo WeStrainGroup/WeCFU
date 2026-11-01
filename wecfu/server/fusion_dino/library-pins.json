@@ -1,0 +1,324 @@
+{
+  "policy": "Fixed distribution versions, frozen pure Python sources, installed SHA256 RECORD for platform binaries; no host path or experimental artifacts",
+  "source_files": [
+    {
+      "distribution": "numpy",
+      "path": "numpy/__init__.py",
+      "sha256": "09295a80660f17925ae23765ce8cbd7ff7ceae968d5f2f89349f1cb74c0b9e11"
+    },
+    {
+      "distribution": "numpy",
+      "path": "numpy/_core/__init__.py",
+      "sha256": "837ce8aec8693095d2e1c7c306d385d1785a50be97a009935c64cae04e3555d2"
+    },
+    {
+      "distribution": "numpy",
+      "path": "numpy/version.py",
+      "sha256": "344c87cc95d8d56eb4addbefe63e798107e1ab2b32141097dd5623ebe166f7ba"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/__init__.py",
+      "sha256": "bd4a10ff16357ed78f45aaf4b46ce5b771fdc0e8549402206e324d0eb792c672"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/_dynamo/__init__.py",
+      "sha256": "a041b940af5ff6c40fdefb50ed88e805277d3fb09a7c51d673d3bfd93963d080"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/_dynamo/decorators.py",
+      "sha256": "97e1c8d18b5e694c5451a15f2425f18795c87cbc9ecc3765b85e3c044ed907ec"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/_subclasses/fake_tensor.py",
+      "sha256": "a650411e6a7adde3791e7a28821fbfc3858425c50433abf6d538629e17c33c58"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/_tensor.py",
+      "sha256": "dead69ea4e782ca5f68f046115b2a6defb3c93fe8ff671d93fa84d139f3d9f33"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/_weights_only_unpickler.py",
+      "sha256": "f805f3feae84fd10f92eff99c0f88d0373d560d9143fe2297f0ebb08a9eb00e9"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/distributed/_mesh_layout.py",
+      "sha256": "81b7b52f0520399dd8ca27b5ac30cc99fb5037f5c73874831db6f170afb08275"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/distributed/device_mesh.py",
+      "sha256": "673bca57b78b606d5d4a30e7e0b1cc8e77fdca673a76a87ac42d0e2c808111e4"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/distributed/distributed_c10d.py",
+      "sha256": "ffa3de81159c96c1a1042c8e2bce52fb604cd7e083675ebd7bed9a12d9c0143b"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/distributed/tensor/__init__.py",
+      "sha256": "f76aa7c860241115b43e321b569392c0fde0b14a0f3234098293e7650f73ee1b"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/distributed/tensor/_api.py",
+      "sha256": "8478b59e24ec4f1227a83407907684e35efac9fbb9b8339503309667fb8bb929"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/distributed/tensor/_dtensor_spec.py",
+      "sha256": "522f69eb670778d0f5a02013fceb10a92e0c5222448492ca006ebc65da5228b0"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/distributed/tensor/placement_types.py",
+      "sha256": "03b05a57583a8e3df8796b4a00ef2e7bb61bcf9b16f3faefaa344419504366e2"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nested/__init__.py",
+      "sha256": "164e66476c527833055ba7a2011ea64b1c98265d68417e27bda4e4afa79c27a2"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nested/_internal/nested_tensor.py",
+      "sha256": "9f7072adaa49eb86bcb2f4d1132516703090d9558450a121acebe11a755835d5"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nn/init.py",
+      "sha256": "59dad5f51cb700bbe3a323a4169e77489470c25582838594f98e8e55f8156f7d"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nn/modules/conv.py",
+      "sha256": "ef261d946378fcb5a047d2113ef715f04b2894eef2f2f7ad6009c920f2e9ebc1"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nn/modules/linear.py",
+      "sha256": "1961ad1a1f650e104b3c7f78d19af2d21bf977e7af6c3fdf2420aad563c9e202"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nn/modules/module.py",
+      "sha256": "d139fc1dc9adb172c208b8b470fc405d8037612c0f08768d275c5bbcc284b9c9"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nn/modules/normalization.py",
+      "sha256": "96284b63a2088c7d378716d5114eb5b6a1c072d479116170fcfd284c57e84b4f"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/nn/modules/sparse.py",
+      "sha256": "4897b5402c35e49c830edaee1eacc1b1c3f802ddc8e7ddf4112a71c78bea81f5"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/random.py",
+      "sha256": "0b2bd65c8fdf324e00ed2c64e7b06ca5d5ff96053001055c86352c0b3668d0be"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/serialization.py",
+      "sha256": "4a25e7d5a44d55ce2578164451b3cfbb65b4bf1be8bdba2fd7b9e008d2cf9021"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/utils/_device.py",
+      "sha256": "571b8141af551c2d8a70ba5071723f725a99a4310b20aab098451062c420cb5c"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/utils/_python_dispatch.py",
+      "sha256": "d592e8d3aabd88e66969f837b83583a871029494de39056cbae6b89ba672820c"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/version.py"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/__init__.py",
+      "sha256": "aa8cb54da488cf43ba37b9955bb6c0d84d2000db0306f6a5f1c20b6842482d04"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/configuration_utils.py",
+      "sha256": "08a3889c1b8a73d340a37c93f72346ee0e385e339b7a72a03b5c026d4943baf7"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/integrations/hub_kernels.py",
+      "sha256": "845f33ef26be915f62efa82aaf3695bf26e6e165eb5e49a2542ae4fc69ea154b"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/modeling_utils.py",
+      "sha256": "bf1c6b2a43cf7c36fb79f37c981424dd6ae78eb863fcaa5d2a37e76c9828611d"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/auto/auto_factory.py",
+      "sha256": "04c0b61097c533459ecf74ee8b9d730abd4febbbfa4a9f73841fb7ff49c8eee2"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/auto/configuration_auto.py",
+      "sha256": "120b62cd4e13dd155762acd14cf64fc8bca17a068f5dd004ddfd30fbcb2ef4ab"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/auto/modeling_auto.py",
+      "sha256": "6e4fa67c88e02a8b84d46d7b1719e760f197073b7b233bcf30eeb596f5a5f07a"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/bert/__init__.py",
+      "sha256": "f08aa8453e5c3b80d4dc69901ec2605be9fa31c94e6539a1a3955890a0cc6e75"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/bert/configuration_bert.py",
+      "sha256": "76fe8eb30215a4d52b5ad23b5a63375da000f02f1907e4b72f3b39265f4b9159"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/bert/modeling_bert.py",
+      "sha256": "89e5e5098b98a206c8835c6c00b52b40d6d078a5994c40f300f98173969137c2"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/grounding_dino/__init__.py",
+      "sha256": "9d3c597d98a80a94bc863fcbf34a9942480fbe2319ad3c64cf5e01f6c4102639"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/grounding_dino/configuration_grounding_dino.py",
+      "sha256": "bf48ec785c4ec1f99d3b17acde82fbe5ef869887632049e09c974c34f0844bf4"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/grounding_dino/modeling_grounding_dino.py",
+      "sha256": "ba98eb52acbd8a7e36bab581fd0f9b092fed3579e37cd6e69c55ea153504b2e0"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/swin/__init__.py",
+      "sha256": "ee971d6a1506f567049040d1a1470c5717689ca82584ea576902e8f3123a2938"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/swin/configuration_swin.py",
+      "sha256": "85c92c138e0c193f7fad660d5ef87297de23a94d34ad06375d74c33f34e5be6a"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/swin/modeling_swin.py",
+      "sha256": "8b0380d98286e5ef639f12543ff05d04e6e346c948bc3a428bb5f139eb559c58"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/utils/backbone_utils.py",
+      "sha256": "5414c9abec7d25905f5757ed45c52a2b73e7b158d577325eb510704c1a2e8203"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/utils/import_utils.py",
+      "sha256": "66b2ac40be2c538dbd9409370c1f6bf769934b8b232edac365e16299c5ec1108"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/grounding_dino/processing_grounding_dino.py",
+      "sha256": "07204d1bbfaf9a4f8e9367c7b303883f19850dbea9c98f45302371c4f000a239"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/grounding_dino/image_processing_grounding_dino.py",
+      "sha256": "3bf156df7a708d4228221adbb5f94aa8ba01606ac90dba4f5afabb78e6e0c59c"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/bert/tokenization_bert.py",
+      "sha256": "15f92ca3917a52e2b2150ff8028e28a7493da350dff74a9e03d209a588f6b7df"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/models/bert/tokenization_bert_fast.py",
+      "sha256": "404eb49966d46d07fc0fde8be5ebc2aaaacdd2145b2b3e8b297860d877fc4ff0"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/tokenization_utils_base.py",
+      "sha256": "a2d62f7e5d58f908b3a2d0b24ce6329e1e52c815082cedde29a5c007a23e7e83"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/tokenization_utils_fast.py",
+      "sha256": "558e454ee6850e90e8bc5d1782e35878dfda1da9bfdf997ae113fa7ff771a0f3"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/processing_utils.py",
+      "sha256": "6c29de5c3fc674cf21ba6377a39cbafb2ba3e4bc2d1202d4b944f8cf840e6f33"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/image_processing_utils.py",
+      "sha256": "740d1fecbdf24983538443b24d9215b50c494b8abed460346bcd8f3c3d69d249"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/image_transforms.py",
+      "sha256": "88e55f70d49404d85b4cca3b0826bf9e29630eb0afb828d37f4347c1fb07986e"
+    },
+    {
+      "distribution": "transformers",
+      "path": "transformers/image_utils.py",
+      "sha256": "4ee4b03eb9bc9d9b2d882c0ec3972d828a0fc1af9620f34ac9d196ddc816c47d"
+    },
+    {
+      "distribution": "Pillow",
+      "path": "PIL/__init__.py",
+      "sha256": "7361b6ad3878589affe5956e4a4da24d71398b0891fd3a8c15e9362217b4ca01"
+    },
+    {
+      "distribution": "Pillow",
+      "path": "PIL/Image.py",
+      "sha256": "04050c2d4dd67931ce8c3cfdbc49ac4a6944d379d037c8f1d5eeeb67fba29a10"
+    },
+    {
+      "distribution": "Pillow",
+      "path": "PIL/ImageFile.py",
+      "sha256": "55a48a69263e4b4d52fc3b419103c92836cf259a4f6383f93d65e1f22aab0c04"
+    },
+    {
+      "distribution": "Pillow",
+      "path": "PIL/JpegImagePlugin.py",
+      "sha256": "43ede4e4c76826e9c4ce9b7dbcfbae61abb09b9955816a88a0d775de28220bba"
+    },
+    {
+      "distribution": "Pillow",
+      "path": "PIL/TiffImagePlugin.py",
+      "sha256": "e3322c6660610c41196adddb6b2d46f303dd0d0034d76544f9364fb32a13f709"
+    },
+    {
+      "distribution": "tokenizers",
+      "path": "tokenizers/__init__.py",
+      "sha256": "148ecb122f3fee03be9abb1fe213dd85fbc691bf2ad2b437ff531533781a6a3a"
+    },
+    {
+      "distribution": "torch",
+      "path": "torch/jit/annotations.py",
+      "sha256": "f91af1a64b62b82bd805acb3b0a02d0f54917de73fcbea102eba1118d304809e"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "product_runtime": true,
+  "engine": "sam_dino_fusion_local_v2",
+  "recipe_id": "sam_dino_raw10_threshold075_auto095_v2",
+  "filter_artifact_sha256": "7542a3b5f3bfe28e7077ee478b944044daf56246a463ec8e9507209ea4c42570",
+  "model_sha256": "fc7ab851da6d09daf36bc49ac1d6e2aec52a6a04f982c588017704805f638209",
+  "sam_model_sha256": "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
+  "dino_model_sha256": "af2e3769e6f1512f4dabb3043b6b4a5de97935549eaa843bfa3074728ce630ea",
+  "detector_contract_sha256": "f14c0d9df19704fce21038e780ae5fa99bff64e90253380e101816c508a14608",
+  "source_files_sha256": {
+    "fusion_worker_v2.py": "b7812b38e04fb056b8dd8eab684000a04bafdc7af844014fc8da7e76ce53bd40",
+    "fusion_dino/fusion_math_v2.py": "904629d7eeced7de8dd063a616095254fb9f86ee1032873fd1f3d3736542f526",
+    "fusion_dino/fusion_math.py": "a07a98a6673e98aabb63c40eff389e5d9ef666e359362fd63c1650a41ae2544a",
+    "fusion_dino/appearance_runtime.py": "f4cee93cb7b1d2122abf4719e96f0b9aa6a7dbb8761e23aec9c7fb3a749a6981"
+  },
+  "inference_downloads": false,
+  "supported_views": [
+    "main",
+    "blank"
+  ],
+  "input_view_contract": "Explicit user declaration bound to actual image SHA256; not filename inference or human count validation"
+}

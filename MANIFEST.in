@@ -1,0 +1,19 @@
+# Start from an allowlist, including for source distributions.
+global-exclude *
+include pyproject.toml MANIFEST.in README.md README_HF.md INSTALL.md USAGE.md SHARE.md CHANGELOG.md
+include LICENSE NOTICE THIRD_PARTY_NOTICES.md
+include meta.yaml environment.yml Dockerfile .dockerignore .gitignore
+recursive-include LICENSES *.txt
+include wecfu/*.py
+include wecfu/model_assets.json
+include wecfu/experiments/__init__.py wecfu/experiments/segmentation.py
+include wecfu/server/*.py
+include wecfu/server/fusion_filter_v2.json wecfu/server/product_fusion_v2.json
+include wecfu/server/sam2_product_use.json
+recursive-include wecfu/server/static *.html *.js *.css
+include wecfu/server/fusion_dino/*.py
+include wecfu/server/fusion_dino/configuration.json
+include wecfu/server/fusion_dino/library-pins.json wecfu/server/fusion_dino/license-provenance.json
+include wecfu/server/fusion_dino/loading-metadata.json wecfu/server/fusion_dino/runtime-contract.json
+recursive-include tests *.py *.cjs
+global-exclude __pycache__ *.pyc *.pyo .DS_Store

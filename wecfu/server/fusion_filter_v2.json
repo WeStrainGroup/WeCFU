@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "recipe_id": "sam_dino_raw10_threshold075_auto095_v2",
+  "model": {
+    "recipe_id": "sam_dino_raw10_threshold075_auto095_v2",
+    "feature_names": [
+      "DINO_max_token_sigmoid_score",
+      "DINO_log_normalized_box_area",
+      "DINO_log_box_aspect",
+      "automatic_plate_radial_ratio",
+      "local_Y_median_difference",
+      "local_Y_absolute_median_difference",
+      "local_chroma_median_difference_norm",
+      "local_Y_IQR_difference",
+      "local_core_valid_fraction",
+      "local_ring_valid_fraction"
+    ],
+    "feature_projection": [
+      0,
+      1,
+      2,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "coefficients": [
+      1.1231926543706234,
+      -0.09664632800086811,
+      -0.2669266445450061,
+      0.13689872951097998,
+      1.5466408014474848,
+      0.6526734355382888,
+      -0.11185394771135333,
+      0.13047756971455005,
+      0.0,
+      0.0
+    ],
+    "intercept": -0.9985323543984218,
+    "preprocessing": {
+      "all_missing": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "ddof": 0,
+      "means": [
+        0.4883532730607212,
+        -6.529352957906289,
+        -0.02600041519482401,
+        0.674784607061228,
+        0.109534289631313,
+        0.12125954738401394,
+        0.04633298561525032,
+        -0.0938781298090451,
+        1.0,
+        1.0
+      ],
+      "medians": [
+        0.3818834125995636,
+        -6.508108973687852,
+        -0.028217178662844792,
+        0.7412715818244805,
+        0.05199015025385645,
+        0.061303164784576564,
+        0.03716953142065836,
+        -0.04918284359105879,
+        1.0,
+        1.0
+      ],
+      "scales": [
+        0.22655536881556468,
+        1.644311905057554,
+        0.085274385037015,
+        0.22944019261034243,
+        0.1369152227844154,
+        0.12664778325484635,
+        0.03454015449201701,
+        0.12252481832064183,
+        1.0,
+        1.0
+      ]
+    },
+    "threshold": 0.75,
+    "L2_coefficient": 1.0,
+    "success": true,
+    "dtype": "float64",
+    "D0_exclusion_fraction": 0.025,
+    "DINO_dedup_fraction": 0.005,
+    "ROI_max_radial": 0.95,
+    "coordinate_method": "raw_DINO_unchanged"
+  }
+}

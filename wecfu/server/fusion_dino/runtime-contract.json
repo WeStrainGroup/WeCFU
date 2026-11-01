@@ -1,0 +1,42 @@
+{
+  "method": "licensed_colony_grounding_dino_official_cpu_colony025_r1",
+  "checkpoint_sha256": "af2e3769e6f1512f4dabb3043b6b4a5de97935549eaa843bfa3074728ce630ea",
+  "model_parameters": {
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 1,
+    "caption": "colony.",
+    "threshold_strict_gt": 0.25,
+    "text_threshold": 0.25,
+    "resize_shortest": 800,
+    "resize_longest": 1333,
+    "queries": 900
+  },
+  "limits": {
+    "single_image_wall_seconds": 120,
+    "single_child_sampled_RSS_bytes": 4294967296,
+    "single_child_CPU_seconds": 120,
+    "metadata_bytes": 33554432,
+    "working_copy_input_bytes": 33554432,
+    "maximum_pixels": 36000000
+  },
+  "schema_version": 1,
+  "scope": "Public fixed-recipe inference; no training or cached predictions",
+  "runtime_policy": "Python 3.12 and fixed distributions; SHA256 RECORD per platform plus frozen pure-Python implementation files; Python standard library is trusted.",
+  "files_sha256": {
+    "dino_provider.py": "e733553da370e39c6fe8f207023fa2edc346901045c89115817bc716f15fbdbd",
+    "dino_worker.py": "eca2732b20772f1c5beea472f354fca31df9eced829236db32041bf708837a73",
+    "loading-metadata.json": "5be01d892147006134045efd1e7caaa34e06dbc8d3e7e4b89e9400ed09b6b14a",
+    "license-provenance.json": "615f2256c91fd8aa3164efa33db65fc4866abb6fb92c0fdd4f9e1108705c4482",
+    "dino_loading.py": "575ec640d6a0ab37a768fbef8e246a3fdd0dac908a839b1d02a63e11e659f3a3",
+    "process_monitor.py": "c7c9f6759a421860e99dc31789cbba1e62b3823759f9262fc49b2f2455580444",
+    "configuration.json": "a57127594ec5c9e189ed4f8747d8b24364968a5b95cb796d0aafe798b2fe9af2",
+    "library-pins.json": "6e8562e27b7bb0301a7e8f5deb4c5a83be6d5831067bdff6f1a9e9481a84f986",
+    "dino_numeric.py": "57ff577308946a6c651a162be86ba39663a82c9ac547e435c97cfa79d787c47f",
+    "dino_contract.py": "eeda6b49ab6afaf395de697fa2781d4110f661a9fdedbd1a832b67f668c138b3"
+  },
+  "package_files_sha256": {
+    "runtime_paths.py": "605e9c1afac3c74eb590b0579b08b3bfd9bd4ecf0c5453972cb33007b0eefb13",
+    "model_assets.json": "1faccbbc9906b51e38f3817c1f59c38daef9d44751f91db062cb7e7738bda653"
+  }
+}

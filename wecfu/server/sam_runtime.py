@@ -1,0 +1,250 @@
+"""Opt-in, local SAM2 D0 provider. No labels, experiment runners or cached predictions.
+
+Each request uses fresh temporary source bytes and separate CV / SAM interpreters.
+The app never imports Torch. Its controller enforces one whole-request deadline
+and sampled child RSS; the SAM child additionally checks its MPS allocation.
+"""
+from __future__ import annotations
+
+from dataclasses import asdict
+import ctypes
+import errno
+import hashlib
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from . import runtime_diagnostics
+from wecfu import runtime_paths
+
+ENGINE = "sam2_local_v1"
+RECIPE_ID = "sam_cv_seed_area0.05_color160_edge095_v1"
+MODEL_SHA256 = "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69"
+SOURCE_COMMIT = "2b90b9f5ceec907a1c18123530e92e794ad901a4"
+PLATE_INSET = .95
+TIMEOUT_SECONDS = 120.0
+RSS_LIMIT_BYTES = 4 * 1024**3
+MAX_JSON_BYTES = 256 * 1024**2
+REPO = Path(__file__).resolve().parents[2]
+RUNTIME = runtime_paths.MODEL_HOME
+SAM_PYTHON = runtime_paths.MODEL_PYTHON
+CV_PYTHON = runtime_paths.CV_PYTHON
+SOURCE = runtime_paths.SAM_SOURCE
+CHECKPOINT = runtime_paths.SAM_CHECKPOINT
+SAM_DEVICE = runtime_paths.SAM_DEVICE
+WORKER = Path(__file__).with_name("sam_worker.py")
+AUTHORIZATION = Path(__file__).with_name("sam2_product_use.json")
+COMPONENT_PARAMS = dict(plate_inset=.95, min_area_frac=.0001, max_area_frac=.05,
+                        min_circularity=.55, max_eccentricity=.88, min_solidity=.8,
+                        peak_min_distance=15, peak_rel_threshold=.5,
+                        min_value=200, max_saturation=160)
+MODEL_SETTINGS = dict(points_per_side=None, points_per_batch=4, pred_iou_thresh=.8,
+                      stability_score_thresh=.95, stability_score_offset=1.0,
+                      mask_threshold=0.0, box_nms_thresh=.7, crop_n_layers=0,
+                      min_mask_region_area=0, output_mode="uncompressed_rle",
+                      use_m2m=False, multimask_output=True)
+
+
+class RuntimeUnavailable(RuntimeError):
+    pass
+
+
+def sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024**2), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def fingerprint(path):
+    s = Path(path).stat()
+    return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+
+
+def sampled_rss(pid):
+    """Read resident bytes of this isolated single-process worker; fail closed."""
+    if sys.platform == "linux":
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) * 1024
+        raise RuntimeUnavailable("Cannot sample local model memory")
+    # Darwin's own-child task information avoids spawning ps in a sandbox.
+    class TaskInfo(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_uint64) for name in (
+            "virtual_size", "resident_size", "total_user", "total_system", "threads_user", "threads_system")]
+        _fields_ += [(name, ctypes.c_int32) for name in (
+            "policy", "faults", "pageins", "cow_faults", "messages_sent", "messages_received",
+            "syscalls_mach", "syscalls_unix", "csw", "threadnum", "numrunning", "priority")]
+    if sys.platform != "darwin" or ctypes.sizeof(TaskInfo) != 96:
+        raise RuntimeUnavailable("Unsupported local memory monitor")
+    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    query = library.proc_pidinfo
+    query.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    query.restype = ctypes.c_int
+    info = TaskInfo()
+    ctypes.set_errno(0)
+    size = query(pid, 4, 0, ctypes.byref(info), ctypes.sizeof(info))
+    if size != ctypes.sizeof(info):
+        number = ctypes.get_errno()
+        if number == errno.ESRCH:
+            raise ProcessLookupError(pid)
+        raise RuntimeUnavailable("Local model memory monitor became unavailable")
+    if info.resident_size <= 0:
+        raise RuntimeUnavailable("Invalid local model memory sample")
+    return int(info.resident_size)
+
+
+def stop_process(process):
+    if process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=4)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeUnavailable("Local model process could not be stopped") from exc
+
+
+def confirm_child_exit(process, deadline):
+    """Bounded same-child poll; an alive/unreapable child never passes as success."""
+    until = min(deadline, time.monotonic() + .05)
+    for _ in range(11):
+        if process.poll() is not None:
+            return True
+        remaining = until - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(.005, remaining))
+    return process.poll() is not None
+
+
+def run_stage(command, folder, deadline, env):
+    """No unbounded pipes; preserve failure log tail before temporary cleanup."""
+    if time.monotonic() >= deadline:
+        raise RuntimeUnavailable("Local model preview exceeded 120 seconds")
+    log = folder / (command[-1] + ".log")
+    peak = 0
+    started = time.monotonic()
+    process = None
+    try:
+        with log.open("xb") as output:
+            process = subprocess.Popen(command, cwd=REPO, env=env, stdout=output,
+                                       stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                while process.poll() is None:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeUnavailable("Local model preview exceeded 120 seconds")
+                    try:
+                        peak = max(peak, sampled_rss(process.pid))
+                    except (ProcessLookupError, FileNotFoundError, RuntimeUnavailable) as sample_error:
+                        if not confirm_child_exit(process, deadline):
+                            raise RuntimeUnavailable("Local model memory monitor became unavailable while child was still active") from sample_error
+                        break
+                    if peak > RSS_LIMIT_BYTES:
+                        raise RuntimeUnavailable("Local model preview exceeded the 4 GiB memory budget")
+                    if any(p.stat().st_size > MAX_JSON_BYTES for p in folder.iterdir() if p.is_file() and p.suffix in {".json", ".log"}):
+                        raise RuntimeUnavailable("Local model preview output exceeded its storage budget")
+                    time.sleep(.1)
+                if process.returncode:
+                    raise RuntimeUnavailable("Local model failed; no candidate was created")
+                if time.monotonic() >= deadline:
+                    raise RuntimeUnavailable("Local model preview exceeded 120 seconds")
+            finally:
+                stop_process(process)
+    except Exception as exc:
+        # Diagnostic persistence must not hide the primary inference error.
+        try:
+            runtime_diagnostics.preserve_failure(exc,phase="local-worker:"+command[-1],folder=folder,
+                details={"returncode":getattr(process,"returncode",None),"elapsed_seconds":time.monotonic()-started,"sampled_peak_rss_bytes":peak,"recipe_unchanged":True})
+        except Exception:
+            pass
+        raise
+    return peak
+
+
+class LocalSamProvider:
+    def __init__(self, *, web_mode=False, enable_for_fusion=False):
+        self.enabled = os.environ.get("WECFU_ENABLE_SAM2", "1") != "0"
+        self._guard = threading.Lock()
+        self._checked_checkpoint = None
+
+    def require_available(self):
+        if sys.platform not in ('darwin', 'linux'):
+            raise RuntimeUnavailable("Local SAM2/Fusion models require macOS or Linux; the core application remains available")
+        if not self.enabled:
+            raise RuntimeUnavailable("Local SAM2 preview is not enabled")
+        try:
+            authority = json.loads(AUTHORIZATION.read_bytes())
+            if (authority.get("approved_for_product_inference") is not True
+                    or authority.get("model_sha256") != MODEL_SHA256
+                    or authority.get("source_commit") != SOURCE_COMMIT
+                    or authority.get("recipe_id") != RECIPE_ID
+                    or authority.get("code_license") != "Apache-2.0"
+                    or authority.get("weights_license") != "Apache-2.0"):
+                raise RuntimeUnavailable("Local SAM2 authorization does not match this recipe")
+            if not all(p.is_file() for p in (SAM_PYTHON, CV_PYTHON, CHECKPOINT, WORKER)):
+                raise RuntimeUnavailable("Local SAM2 runtime or weights are missing; no download will be attempted")
+            before = fingerprint(CHECKPOINT)
+            with self._guard:
+                if self._checked_checkpoint != before:
+                    if sha(CHECKPOINT) != MODEL_SHA256 or fingerprint(CHECKPOINT) != before:
+                        raise RuntimeUnavailable("Local SAM2 weights failed integrity verification")
+                    self._checked_checkpoint = before
+            if runtime_paths.verify_sam_source() != SOURCE_COMMIT:
+                raise RuntimeUnavailable("SAM2 source differs from its pinned revision")
+            return before
+        except RuntimeUnavailable:
+            raise
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise RuntimeUnavailable("Local SAM2 runtime cannot be verified") from exc
+
+    def capability(self):
+        reason = None
+        try:
+            self.require_available()
+        except RuntimeUnavailable as exc:
+            reason = str(exc)
+        return dict(enabled=self.enabled, available=reason is None, reason=reason,
+                    engine=ENGINE, model_sha256=MODEL_SHA256, recipe_id=RECIPE_ID,
+                    label="SAM2", plate_inset=PLATE_INSET, device=SAM_DEVICE, runtime_python=SAM_PYTHON.name)
+
+    def predict(self, payload, plate, image_sha256, *, deadline=None):
+        started = time.monotonic()
+        deadline = min(started + TIMEOUT_SECONDS, deadline) if deadline is not None else started + TIMEOUT_SECONDS
+        pin = self.require_available()
+        if hashlib.sha256(payload).hexdigest() != image_sha256:
+            raise RuntimeUnavailable("Local SAM2 source bytes changed")
+        # The only copied input is the current displayed image; no filesystem
+        # paths, human points, references, notes or person identity reach workers.
+        with tempfile.TemporaryDirectory(prefix="wecfu-sam-preview-") as scratch:
+            folder = Path(scratch)
+            (folder / "source.image").write_bytes(payload)
+            os.chmod(folder / "source.image", 0o400)
+            request = dict(engine=ENGINE, recipe_id=RECIPE_ID, image_sha256=image_sha256,
+                           plate=asdict(plate), model_sha256=MODEL_SHA256)
+            (folder / "request.json").write_text(json.dumps(request, allow_nan=False))
+            env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(REPO),
+                   "PYTORCH_ENABLE_MPS_FALLBACK": "0", "HF_HUB_OFFLINE": "1",
+                   "TRANSFORMERS_OFFLINE": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+                   "OPENBLAS_NUM_THREADS": "1", "VECLIB_MAXIMUM_THREADS": "1"}
+            peaks = []
+            for executable, stage in ((CV_PYTHON, "prepare"), (SAM_PYTHON, "infer"), (CV_PYTHON, "finish")):
+                peaks.append(run_stage([str(executable), "-B", str(WORKER), str(folder), stage], folder, deadline, env))
+            result = json.loads((folder / "result.json").read_bytes())
+            if (result.get("engine") != ENGINE or result.get("recipe_id") != RECIPE_ID
+                    or result.get("image_sha256") != image_sha256 or result.get("model_sha256") != MODEL_SHA256
+                    or result.get("plate") != asdict(plate) or result.get("status") != "ok"
+                    or fingerprint(CHECKPOINT) != pin):
+                raise RuntimeUnavailable("Local SAM2 result provenance changed")
+            if not isinstance(result.get("detections"), list) or len(result["detections"]) > 20000:
+                raise RuntimeUnavailable("Local SAM2 produced invalid candidates")
+            if time.monotonic() >= deadline:
+                raise RuntimeUnavailable("Local model preview exceeded 120 seconds")
+            return result["detections"], result["raw_count"]

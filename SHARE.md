@@ -1,103 +1,105 @@
-# 分发 WeCFU 给协作者
+# Publish a reviewed WeCFU release
 
-三个渠道都已上线。给协作者只需发链接；给维护者（你）下面也有发新版的完整流程。
+The existing public targets are:
 
----
+| Channel | Target |
+| --- | --- |
+| GitHub source and release files | https://github.com/WeStrainGroup/WeCFU |
+| Conda package | https://anaconda.org/westraingroup/wecfu |
+| Hosted Docker application | https://huggingface.co/spaces/WeCFU/wecfu |
 
-## 给协作者：三种用法
+Use a clean, reviewed release checkout. Keep private development history,
+workspaces, research notes and model caches outside it. The GitHub repository's
+previously published hardware files are not part of the Python/Conda artifacts
+or the hosted application. Do not copy them into the Hugging Face checkout.
 
-### 1. 网页版（最简单，零安装）
+## Prepare one consistent release
 
-**https://huggingface.co/spaces/WeCFU/wecfu**
+1. Set the same version in `wecfu/__init__.py`, `pyproject.toml` and `meta.yaml`.
+   Update CHANGELOG, installation examples and the model notices when applicable.
+2. Review every staged path and the public JSON resources. The package allowlist
+   is in MANIFEST.in and pyproject.toml. No photographs, model weight binaries,
+   source-view registries, private authorization records or research results
+   belong in the commit or build context.
+3. Run the maintained Python and Node tests. Exercise editing/export and model
+   candidate application in a disposable synthetic workspace. Check local and
+   hosted session isolation. Use the selected fixed model runtime and cache;
+   do not reuse a user's working directory for acceptance tests.
+4. Commit the final product files before building. The Conda recipe snapshots
+   Git HEAD; uncommitted edits will not be included.
 
-> WeCFU 网页版，浏览器打开直接用，无需安装：
-> https://huggingface.co/spaces/WeCFU/wecfu
-> 把图片拖进去就行。每次会话上限 100 张 / 400 MB，1 小时不动会自动清空。
-> 想要无限制、本地长期用 → 用下面的 conda 方式。
+The model runtime uses Python 3.12. Its dependency pins are in the `models` extra.
+`wecfu/model_assets.json` fixes public source revisions, URLs, sizes and hashes.
+The setup command downloads those assets; model requests only read the verified
+local cache. Docker installs the official CPU PyTorch wheels and prepares that
+cache before starting the web application.
 
-### 2. 本地 conda
+## Build and inspect artifacts
 
-**https://anaconda.org/WeStrainGroup/wecfu**
+From the reviewed release commit:
 
-> 装上 conda（Windows 用 Anaconda Prompt）后两行搞定：
-> ```bash
-> conda install westraingroup::wecfu
-> wecfu serve
-> ```
-> 浏览器自动开 http://127.0.0.1:8765 。详细用法看仓库 USAGE.md。
-
-### 3. GitHub 源码
-
-**https://github.com/WeStrainGroup/WeCFU**
-
-> ```bash
-> git clone https://github.com/WeStrainGroup/WeCFU.git
-> cd WeCFU
-> conda env create -f environment.yml
-> conda activate wecfu
-> pip install -e .
-> wecfu serve
-> ```
-
----
-
-## 给维护者：发一个新版本
-
-每次改完代码，按这套流程把版本同步到全部三处。把 `<版本>` 换成新版本号（例如 `1.0.8`）。
-
-### 第 0 步：改版本号 + 提交
-
-```bash
-cd ~/claude_code_workspace/WeF/WeCFU
-# 三个文件的 version 一起改成 <版本>：
-#   wecfu/__init__.py   pyproject.toml   meta.yaml
-git add -A && git commit -m "v<版本>: 改了什么的简短说明"
-```
-
-### 第 1 步：GitHub（main + release）
-
-```bash
-python -m build                       # 产出 dist/wecfu-<版本>-py3-none-any.whl + .tar.gz
-git push github main
-gh release create v<版本> dist/wecfu-<版本>-py3-none-any.whl dist/wecfu-<版本>.tar.gz \
-    --title "v<版本>" --notes "改了什么"
-```
-
-### 第 2 步：conda channel
-
-```bash
+```sh
+python -m build
 conda build . -c conda-forge --no-anaconda-upload
-anaconda login --username westraingroup           # 用户名必须小写；密码见你保存的笔记
-anaconda upload ~/miniconda3/conda-bld/noarch/wecfu-<版本>-py_0.conda
-anaconda logout
+python tests/test_release_packaging.py dist/wecfu-1.2.0-py3-none-any.whl dist/wecfu-1.2.0.tar.gz
 ```
 
-### 第 3 步：Hugging Face Space
+Pass the actual `.conda` output path printed by conda-build to the same auditor:
 
-HF 的 pre-receive hook 会扫整段 git 历史并拒绝大二进制文件，所以 **hf-deploy 分支不能含 `hardware/`**（里面有实拍大图）。用这套"从 hf 当前状态重建"的流程，绕过历史污染：
-
-```bash
-git fetch hf
-git checkout hf-deploy
-git reset --hard hf/main
-# 把 main 的最新内容覆盖进来，但排除 hardware/
-git checkout main -- $(git ls-tree -r --name-only main | grep -v '^hardware/')
-cp README_HF.md README.md             # HF 需要带 frontmatter 的 README
-git add -A && git commit -m "v<版本> (hf-deploy)"
-git push hf hf-deploy:main
-git checkout main
+```sh
+python tests/test_release_packaging.py /path/to/wecfu-1.2.0-py_0.conda
 ```
 
-HF 自动重新构建，约 2–3 分钟。
+The auditor reads archive members without installing or extracting them. It
+rejects unapproved resources and checks that all public runtime JSON, setup
+code, interface files and third-party notices are present. The `.conda` reader
+requires `zstandard`, supplied by the build environment. Also install the built
+core package and wheel in clean environments and run their CLI/API smoke tests.
+A source-tree test pass does not prove that the distribution contains its assets.
 
-> 纯文档改动（只动仓库根的 .md，不动 `wecfu/` 代码）可以跳过第 2 步——conda 包里不含这些文件，版本号也不必动。
+## Publish GitHub and Conda
 
----
+After artifact inspection and clean-install validation:
 
-## 协作者那边的常见坑
+```sh
+git tag v1.2.0
+git push github HEAD:main v1.2.0
+gh release create v1.2.0 --repo WeStrainGroup/WeCFU --verify-tag \
+  dist/wecfu-1.2.0-py3-none-any.whl dist/wecfu-1.2.0.tar.gz \
+  --title 'WeCFU 1.2.0' --notes-file CHANGELOG.md
+anaconda --at anaconda.org whoami
+anaconda --at anaconda.org upload /path/to/wecfu-1.2.0-py_0.conda
+```
 
-- **`command not found: wecfu`** → 忘了 `conda activate wecfu`。
-- **`opencv` 装失败** → 用 conda 装（`environment.yml` 里的 `opencv` 走 conda-forge），别用 pip 的 `opencv-python`。
-- **Windows** → 已支持。在「Anaconda Prompt」里跑（不是 cmd / PowerShell）。导入图片用拖拽最稳。
-- **macOS 弹"身份不明的开发者"** → 这是 Python 包不是 .app，不会弹；弹了说明装错东西。
-- **协作者想把结果发回来** → 让他点顶部 **「Export bundle」** 得到 zip（CSV + 标注图 + 每张图 JSON 状态档），发给你即可，你能接着审或合并。
+Use the actual reviewed branch/ref if it differs from `main`; do not publish a
+stale branch merely because an example names it. Existing authentication can be
+reused. Never place tokens or passwords in repository files or command output.
+After upload, verify the public release asset list and the Conda channel version.
+
+The noarch Conda package deliberately omits large model dependencies and weights.
+Publish the matching GitHub wheel first so INSTALL.md's model-extra command is
+usable as soon as the Conda version appears. Do not advertise the core-only
+package as having a ready-to-run Fusion model cache.
+
+## Update the existing Hugging Face Space
+
+Use a separate checkout of the existing Space `main`, preserving its history.
+Copy only the reviewed public application files, `pyproject.toml`, Dockerfile,
+`.dockerignore`, LICENSE, NOTICE, THIRD_PARTY_NOTICES.md and LICENSES. Use
+`README_HF.md` as that checkout's `README.md`. Keep ordinary GitHub documentation
+separate. Review deletions as well as additions so removed code is not left behind.
+
+Commit the reviewed diff and push normally to the existing Space `main`. Do not
+merge the application's entire Git history, reset a shared working checkout or
+force-push the Space. The Docker build installs the model extra, downloads its
+fixed assets and runs an asset check; a failure must leave deployment incomplete
+rather than removing model functionality.
+
+Wait for the actual build and runtime status. Then verify the displayed version,
+Fusion v2 availability, a synthetic inference request, candidate application,
+export and two separate visitor sessions. A successful Git push alone is not a
+successful deployment. Record the published source commit, artifact hashes and
+Space commit together; report any failed channel explicitly.
+
+Hosted workspaces remain ephemeral. Exported user files and sessions are not
+part of a release, and redeployment can discard active hosted sessions.

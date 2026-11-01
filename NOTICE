@@ -16,3 +16,8 @@ non-commercial purposes, provided you give appropriate credit and distribute
 any adaptations under the same license. Commercial use is NOT permitted
 without separate written permission from the copyright holders — to request a
 commercial license, contact the authors.
+
+Third-party source, models and dependencies retain their respective licenses.
+See THIRD_PARTY_NOTICES.md and LICENSES/ for attribution and full license text.
+The CC BY-NC-SA notice above applies to WeCFU's original work and does not
+replace the Apache-2.0, BSD or other terms of third-party components.

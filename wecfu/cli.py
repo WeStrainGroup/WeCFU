@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
 import webbrowser
 from pathlib import Path
@@ -45,12 +44,8 @@ def _cmd_serve(args) -> int:
     from .server.app import build_app
 
     root = Path(args.root).expanduser().resolve()
-    # Fresh workspace on every server start.
-    if root.exists():
-        for sub in ("inputs", "runs"):
-            d = root / sub
-            if d.exists():
-                shutil.rmtree(d)
+    # Internal edition: keep imported plates and edits across restarts.
+    # Its launcher uses a workspace separate from the released edition.
     root.mkdir(parents=True, exist_ok=True)
     (root / "inputs").mkdir(exist_ok=True)
     (root / "runs").mkdir(exist_ok=True)
@@ -104,7 +99,7 @@ def main() -> int:
     ps.add_argument(
         "--root",
         default="./data",
-        help="workspace root containing inputs/ and runs/ (default: ./data)",
+        help="persistent workspace containing inputs/ and runs/ (default: ./data)",
     )
     ps.add_argument("--port", type=int, default=8765)
     ps.add_argument("--no-open", dest="open", action="store_false")

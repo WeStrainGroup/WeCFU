@@ -1,0 +1,11 @@
+{
+  "approved_for_product_inference": true,
+  "engine": "sam2_local_v1",
+  "recipe_id": "sam_cv_seed_area0.05_color160_edge095_v1",
+  "model_sha256": "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
+  "source_commit": "2b90b9f5ceec907a1c18123530e92e794ad901a4",
+  "code_license": "Apache-2.0",
+  "weights_license": "Apache-2.0",
+  "source": "https://github.com/facebookresearch/sam2",
+  "inference_downloads": false
+}

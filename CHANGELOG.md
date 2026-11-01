@@ -1,0 +1,26 @@
+# Changelog
+
+## 1.2.0
+
+- Add the Fusion v2 automatic workflow using fixed SAM 2.1, colony Grounding DINO
+  and candidate-filter components, with declared front/empty plate input views.
+- Provide portable, explicitly installed model assets and pinned dependencies;
+  verify asset content before use. The hosted Docker build prepares a CPU model
+  cache. Model errors remain visible and never trigger a silent classical fallback.
+- Refresh the interface with a light theme, default/custom method controls,
+  clearer manual correction tools and a collapsible export area.
+- Preserve local workspaces across application restarts. Separate hosted visitors'
+  temporary workspaces and retain explicit candidate application, undo and saved
+  model provenance.
+- Improve editing, navigation, view controls and export handling. Export the
+  saved count together with user corrections and per-image state.
+- Keep public application packages free of user photographs, workspaces, research
+  records, training labels and pretrained weight binaries. Include public model
+  configuration and third-party notices.
+
+These changes describe product functionality. They do not claim independent
+accuracy validation or consistent improvements across species, media or cameras.
+
+## 1.1.0
+
+- Published the application under CC BY-NC-SA 4.0 with attribution in NOTICE.

@@ -1,79 +1,140 @@
-# 安装指南（给协作者）
+# Install and run WeCFU 1.2.0
 
-## 方式 −1 — 不装任何东西，浏览器直接用（最快）
+## Full local installation: Fusion v2 and the review interface
 
-打开 **https://huggingface.co/spaces/WeCFU/wecfu**，把图片拖进去就行。
+Use Python 3.12 in a dedicated environment. The fixed model runtime checks for
+Python 3.12; the core application alone supports Python 3.10+. Model execution supports Linux CPU and macOS (Apple MPS or explicitly selected
+CPU). Windows supports the core interface and classical/manual methods; the
+current model process monitor requires Linux or macOS. A failed
+model operation is reported, with no automatic change of device or algorithm.
 
-适合临时计数 / 偶尔用一次。单次会话上限 **100 张图 / 400 MB**，1 小时不动会自动清空。
-长期使用、大批量、或想要完全离线 → 用下面的本地安装方式。
-
----
-
-## 方式 0 — 一行 conda install（本地长期使用推荐）
-
-```bash
-conda create -n wecfu -c westraingroup -c conda-forge wecfu -y
+```sh
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 pip wecfu=1.2.0 -y
 conda activate wecfu
+```
+
+On **Linux CPU systems**, install the official CPU-only PyTorch wheels first:
+
+```sh
+python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
+```
+
+Then, on Linux or macOS, install the matching release's model extras and
+prepare its verified model cache:
+
+```sh
+python -m pip install "wecfu[models] @ https://github.com/WeStrainGroup/WeCFU/releases/download/v1.2.0/wecfu-1.2.0-py3-none-any.whl"
+python -m wecfu.setup_models
+python -m wecfu.setup_models --check --runtime-check
 wecfu serve
 ```
 
-完成。浏览器会自动开 http://127.0.0.1:8765 。详细用法见 [USAGE.md](USAGE.md)。
+The direct wheel URL is intentional: it selects this project's GitHub release
+and installs the same application version with its optional model dependencies.
+No PyPI publication of WeCFU is required. Setup obtains about 1.36 GB of weights
+from their fixed official sources, plus the small tokenizer/source files. Allow
+several additional GB for dependencies and installation caches. Keep setup
+connected to the internet until it completes. Model inference itself uses the
+local cache and does not upload photographs to an inference service.
 
-### Windows 用户
+The browser opens `http://127.0.0.1:8765`. `wecfu serve` preserves its local
+`./data` workspace across restarts. To select another workspace or avoid opening
+a browser automatically:
 
-命令**完全一样**，只是入口不同：
+```sh
+wecfu serve --root /path/to/workspace --no-open
+```
 
-1. 装 [Miniconda for Windows](https://docs.conda.io/projects/miniconda/en/latest/)（一路 Next 即可）。
-2. 开始菜单里打开 **「Anaconda Prompt」**（不是 cmd / PowerShell —— 用这个 conda 才在 PATH 上）。
-3. 在 Anaconda Prompt 里粘上面那三行，回车。`wecfu serve` 跑起来后浏览器自动打开 http://127.0.0.1:8765 。
+On Windows, use Anaconda Prompt. Importing files by drag and drop is supported;
+local-path ingestion falls back to copying when symlinks are unavailable.
 
-> Windows 上推荐用**拖拽**导入图片（把文件或文件夹拖到网页左侧）。「Ingest path」粘路径的方式也能用——v1.0.7 起，当 Windows 不允许创建符号链接时会自动退化成复制，不再报错。
+## Core application without model downloads
 
-macOS / Linux 用「终端 Terminal」，命令同上。
+```sh
+conda create -n wecfu-core -c westraingroup -c conda-forge python=3.12 wecfu=1.2.0 -y
+conda activate wecfu-core
+wecfu serve
+```
 
----
+This installs the interface, manual tools and explicitly selected classical
+methods. Default Fusion v2 remains unavailable until the model runtime and
+assets are installed. Its unavailability does not silently switch your chosen
+method or overwrite saved results.
 
-## 方式 A — 从 Git 仓库克隆（开发 / 想改代码用）
+## Install from a source checkout
 
-```bash
-git clone https://github.com/<你的用户名>/WeCFU.git
+```sh
+git clone https://github.com/WeStrainGroup/WeCFU.git
 cd WeCFU
-
-# 一次性建环境（约 3–5 分钟）
-conda env create -f environment.yml
-conda activate wecfu
-
-# 以可编辑模式安装本工具
-pip install -e .
-
-# 启动 GUI（自动开浏览器到 http://127.0.0.1:8765）
+git checkout v1.2.0
+conda create -n wecfu-source -c conda-forge python=3.12 pip -y
+conda activate wecfu-source
+python -m pip install '.[models,dev]'
+python -m wecfu.setup_models
 wecfu serve
 ```
 
-## 方式 B — 从预编译的 wheel 安装
+On a Linux CPU-only installation, install the two CPU wheels shown above before
+the extras command. Do not use `pip install sam2`: the supported SAM source is
+obtained at the exact revision by WeCFU's setup command.
 
-如果发布者从 [GitHub Releases](https://github.com/WeStrainGroup/WeCFU/releases) 给了你一个 `wecfu-<版本>-py3-none-any.whl`（不走 conda channel 时的备选）：
+## Model cache and offline operation
 
-```bash
-conda create -n wecfu -c conda-forge python=3.12 opencv numpy scipy scikit-image pillow pandas fastapi uvicorn python-multipart -y
-conda activate wecfu
-pip install wecfu-*-py3-none-any.whl
-wecfu serve
+Set `WECFU_MODEL_HOME` to select the shared model cache before running setup and
+the application. The default cache is `~/Library/Caches/WeCFU/models` on macOS
+and `$XDG_CACHE_HOME/wecfu/models` (normally `~/.cache/wecfu/models`) on Linux.
+The application reports an unavailable model if a required file is absent or
+has a different checksum. Setup refuses to overwrite a mismatched existing file.
+
+```sh
+python -m wecfu.setup_models --cache-dir /path/to/model-cache
+python -m wecfu.setup_models --cache-dir /path/to/model-cache --check
 ```
 
-## 系统要求
+When using `--cache-dir`, also configure `WECFU_MODEL_HOME` to that directory for
+subsequent application runs. For an offline machine, transfer the verified model
+cache and install the pinned Python dependency wheels in advance, then run
+`--check` there. No input images or results belong in the model cache.
 
-- macOS / Linux / Windows
-- Python 3.10+，推荐 3.12
-- 约 1.5 GB 磁盘（conda 环境 + 依赖）
+`WECFU_MODEL_PYTHON` can select the Python interpreter holding model dependencies;
+`WECFU_CV_PYTHON` can select the classical image-processing interpreter. Both
+default to the application's Python. `WECFU_SAM_DEVICE=cpu` explicitly requests
+CPU processing; `mps` requires a working Apple MPS device. Restart the application
+after changing these settings. `WECFU_ENABLE_FUSION_V2=0` explicitly disables the
+fusion option.
 
-## 验证
+## Count and review
 
-```bash
-wecfu --help        # 看到 batch / serve / web 三个子命令
-pytest tests        # 跑一下单元测试，应全部通过（仅 Git 克隆方式有 tests/）
+Declare the imported photo's view and check the medium boundary before a model
+request. Fusion v2 supports declared front/empty views; it rejects reverse or
+undeclared views. For an existing workspace image, use **More → Photo type**
+(**更多 → 照片类型**) to set or correct its declaration. This changes metadata
+only; it does not recount the image, replace saved markings, or confirm a human
+reference. Classical/manual methods can also be selected explicitly.
+Model candidates only replace markings when you apply
+them. Review corrections before exporting; ordinary saves do not create an
+independent human-reference annotation.
+
+The local batch command uses the classical pipeline:
+
+```sh
+wecfu batch /path/to/photos --out /path/to/results
 ```
 
-## 用法
+## Troubleshooting
 
-请看 [USAGE.md](USAGE.md)。
+- **Model unavailable:** run `python -m wecfu.setup_models --check --runtime-check` in the active
+  environment, confirm the `models` extra is installed, and check the cache path.
+- **Unsupported Python:** create the Python 3.12 environment above; do not relax
+  dependency pins to make an older interpreter install the model stack.
+- **Model error or timeout:** the interface shows the failure without returning
+  a partial or substituted count. Saved markings remain intact. Check the
+  specific error and available memory before trying again.
+- **Old appearance in an already open tab:** reload the page after upgrading and
+  restarting the service.
+- **Hosted session:** export before leaving. The Hugging Face workspace is
+  temporary and separate from local workspaces.
+
+Public sources, fixed model identities and upstream notices are documented in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Development validation uses
+synthetic workspaces; it should not use or alter a user's working directory.

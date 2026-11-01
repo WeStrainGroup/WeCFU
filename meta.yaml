@@ -1,13 +1,12 @@
 {% set name = "wecfu" %}
-{% set version = "1.1.0" %}
+{% set version = "1.2.0" %}
 
 package:
   name: {{ name|lower }}
   version: {{ version }}
 
 source:
-  # Use git so .gitignore is honoured — keeps `data/`, build artefacts,
-  # and the user's input photos OUT of the package snapshot.
+  # Build only the reviewed release commit. Runtime data is never tracked.
   git_url: .
   git_rev: HEAD
 
@@ -15,7 +14,14 @@ build:
   number: 0
   noarch: python
   include_recipe: false   # don't embed the recipe+source into info/ (smaller)
-  script: "{{ PYTHON }} -m pip install . -vv --no-deps --ignore-installed"
+  script:
+    - "{{ PYTHON }} -m pip install . -vv --no-deps --ignore-installed"
+    # pip records the local build directory; it is not product provenance.
+    - >-
+      {{ PYTHON }} -c "import pathlib, importlib.metadata as m;
+      d = m.distribution('wecfu');
+      [pathlib.Path(d.locate_file(f)).unlink(missing_ok=True) for f in d.files or ()
+      if str(f).endswith('.dist-info/direct_url.json')]"
   entry_points:
     - wecfu = wecfu.cli:main
 
@@ -34,6 +40,7 @@ requirements:
     - pillow
     - pandas
     - fastapi
+    - pydantic >=2,<3
     - uvicorn
     - python-multipart
 
@@ -55,10 +62,11 @@ about:
   summary: "WeCFU — a friendly, interactive, web-based colony counter for petri dish photos"
   description: |
     WeCFU is a local web tool for counting colonies on petri-dish photos.
-    Drop images in, get an automatic count, click to correct, export.
-    Multilingual UI, click-to-add / right-click-to-delete editing,
-    tunable parameters with a live threshold preview, and a CSV / zip
-    export with annotated images.
+    Review plate photos, correct colony markers, and export CSV or ZIP.
+    The noarch package includes the interface and classical methods.
+    Fusion v2 uses the separately installed, pinned models extra and
+    verified model cache; see INSTALL.md. It never silently substitutes
+    a classical result when a selected model is unavailable.
 
 extra:
   recipe-maintainers:
