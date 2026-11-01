@@ -21,6 +21,11 @@ candidate filter. Its pinned CPU dependencies and verified model cache are
 prepared when this Space builds. Missing models or inference errors are reported;
 the app does not silently replace a model result with a classical count.
 
+Fusion v2 allows up to 180 seconds for the complete web preview (120 seconds
+locally). The DINO child still has a 120-second wall/CPU limit and 4 GiB memory
+budget. These are deployment limits; model parameters are unchanged, and failed
+requests do not automatically retry or return a partial count.
+
 Declare front/empty plate views before using Fusion v2. Reverse views are not
 supported by that recipe. Model candidates require human review; this release
 does not establish accuracy across all organisms or imaging conditions.

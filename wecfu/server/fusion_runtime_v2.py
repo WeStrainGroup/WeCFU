@@ -38,6 +38,7 @@ def view_for_source(image_sha256,declaration=None):
 
 class LocalFusionProvider:
     def __init__(self,*,web_mode=False):
+        self.timeout_seconds=180. if web_mode else TIMEOUT_SECONDS
         self.enabled=os.environ.get('WECFU_ENABLE_FUSION_V2','1')=='1'
         self.sam=sam_runtime.LocalSamProvider(web_mode=web_mode,enable_for_fusion=True)
         # The default Fusion v2 product includes the unchanged SAM stage.
@@ -78,14 +79,15 @@ class LocalFusionProvider:
                     dino_model_sha256=dino_contract.CHECKPOINT_SHA,annotation_kind=ANNOTATION_KIND,
                     feature_projection=[0,1,2,5,6,7,8,9,10,11],D0_exclusion_fraction=.025,coordinate_method='raw_DINO_unchanged',
                     requires_automatic_plate=True,supported_views=['main','blank'],
-                    requires_source_view_declaration=True,default_model=True,fallback=False)
+                    requires_source_view_declaration=True,default_model=True,fallback=False,
+                    wall_timeout_seconds=self.timeout_seconds)
 
     def predict(self,payload,plate,image_sha256,width,height,view,*,deadline=None):
-        started=time.monotonic();deadline=min(started+TIMEOUT_SECONDS,deadline) if deadline is not None else started+TIMEOUT_SECONDS
+        started=time.monotonic();deadline=min(started+self.timeout_seconds,deadline) if deadline is not None else started+self.timeout_seconds
         require(view in ('main','blank'),'Fusion supports front and blank images only; back images are separate')
         require(hashlib.sha256(payload).hexdigest()==image_sha256,'Fusion source bytes changed')
         authority,artifact=self.require_available()
-        require(time.monotonic()<deadline,'Fusion preview exceeded its shared 120-second deadline')
+        require(time.monotonic()<deadline,'Fusion preview exceeded its shared deadline')
         # SAM completes and its child is reaped before DINO starts.
         original,sam_raw=self.sam.predict(payload,plate,image_sha256,deadline=deadline)
         with tempfile.TemporaryDirectory(prefix='wecfu-fusion-preview-') as tmp:
@@ -115,7 +117,7 @@ class LocalFusionProvider:
             require(final['status']=='ok' and final['image_sha256']==image_sha256 and final['filter_artifact_sha256']==authority['filter_artifact_sha256'],'Fusion result source binding changed')
             require(final['detections'][:len(original)]==original and final['d0_count']==len(original) and final['supplemental_count']==len(final['detections'])-len(original),'Fusion must preserve all D0 marks exactly')
             after,_=self.require_available();require(after==authority,'Fusion binding changed while inference ran')
-            require(time.monotonic()<deadline,'Fusion preview exceeded shared 120 seconds; no partial result')
+            require(time.monotonic()<deadline,'Fusion preview exceeded its shared deadline; no partial result')
             raw_count=sam_raw+dino['count']
             provenance={k:authority[k] for k in ('model_sha256','filter_artifact_sha256','sam_model_sha256','dino_model_sha256','detector_contract_sha256')}
             provenance.update(recipe_id=RECIPE_ID,image_sha256=image_sha256,plate_inset=.95,automatic_plate=asdict(plate),raw_count=raw_count,

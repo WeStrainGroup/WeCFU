@@ -988,7 +988,9 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
         require_preview_enabled(body.engine)
         root = get_root()
         started = time.perf_counter()
-        deadline = time.monotonic() + fusion_runtime.TIMEOUT_SECONDS
+        timeout_seconds = (preview_manager.fusion_v2.timeout_seconds
+                           if body.engine == fusion_runtime_v2.ENGINE else fusion_runtime.TIMEOUT_SECONDS)
+        deadline = time.monotonic() + timeout_seconds
         fusion_provenance = None
         with _lock(root, batch, name):
             image, state, snapshot = preview_context(root, batch, name, body.expected_revision, body.expected_image_sha256)
@@ -1060,7 +1062,7 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
             except (OSError, human_reference.ReferenceChanged) as exc:
                 raise HTTPException(409, "source changed during model preview; reload the image") from exc
             if body.engine in _FUSION_ENGINES and time.monotonic() >= deadline:
-                raise HTTPException(503, "Fusion exceeded the shared 120-second deadline; no candidate was created")
+                raise HTTPException(503, "Fusion exceeded the shared deadline; no candidate was created")
             return preview_manager.create_candidate(
                 (str(root.resolve()), batch, name), current, snapshot.sha256,
                 model_params, [_dump(d) for d in validated], raw_count,
