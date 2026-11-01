@@ -822,7 +822,6 @@ function applyI18n(root = document) {
 }
 
 window.WECFU_I18N = { setLang, getLang, t, applyI18n, LANG_NAMES, I18N };
-})();
 
 I18N.en.normalizedValueInvalid = 'Enter a value from 0 to 1.';
 I18N['zh-CN'].normalizedValueInvalid = '请输入 0 到 1 之间的数值。';
@@ -838,3 +837,4 @@ Object.assign(I18N['zh-CN'], {
   sourceViewRequired: '默认识别支持正面与空白皿。请在「更多」中指定照片类型。', sourceViewSaved: '已保存照片类型。',
   modelUnavailable: '默认识别暂不可用。', fusionV2Warning: '请检查识别标记后采用。', fusionV2SavedSource: '融合识别', fusionV2Method: '融合识别',
 });
+})();
