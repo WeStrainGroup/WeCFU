@@ -17,11 +17,7 @@ build:
   script:
     - "{{ PYTHON }} -m pip install . -vv --no-deps --ignore-installed"
     # pip records the local build directory; it is not product provenance.
-    - >-
-      {{ PYTHON }} -c "import pathlib, importlib.metadata as m;
-      d = m.distribution('wecfu');
-      [pathlib.Path(d.locate_file(f)).unlink(missing_ok=True) for f in d.files or ()
-      if str(f).endswith('.dist-info/direct_url.json')]"
+    - "{{ PYTHON }} -c \"import pathlib, importlib.metadata as m; d = m.distribution('wecfu'); [pathlib.Path(d.locate_file(f)).unlink(missing_ok=True) for f in d.files or () if str(f).endswith('.dist-info/direct_url.json')]\""
   entry_points:
     - wecfu = wecfu.cli:main
 
