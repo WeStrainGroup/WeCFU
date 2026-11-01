@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import posixpath
 import shutil
 import subprocess
 import tarfile
@@ -34,6 +35,59 @@ def _copy_verified(stream,destination,sha256,size):
     finally: temporary.unlink(missing_ok=True)
 
 
+def _install_sam_source(tar, destination, manifest):
+    """Copy pinned bytes only; resolve upstream aliases inside this archive.
+
+    Official SAM archives include legacy YAML symlinks. Never extract those
+    links onto disk or let tarfile resolve them implicitly against a filesystem.
+    """
+    root = 'sam2-' + manifest['commit']
+    members = {}
+    for member in tar.getmembers():
+        name = member.name.rstrip('/')
+        parts = PurePosixPath(name).parts
+        if (not parts or parts[0] != root or name.startswith('/') or '\\' in name
+                or '..' in parts or posixpath.normpath(name) != name):
+            raise RuntimeError('Unsafe SAM source archive path: ' + member.name)
+        if name in members:
+            raise RuntimeError('Repeated SAM source archive entry: ' + name)
+        members[name] = member
+    selected = {}
+    for rel, digest in manifest['files_sha256'].items():
+        parts = PurePosixPath(rel).parts
+        if not parts or rel.startswith('/') or '\\' in rel or '..' in parts or posixpath.normpath(rel) != rel:
+            raise RuntimeError('Unsafe pinned SAM source path')
+        name = root + '/' + rel
+        seen = set()
+        while True:
+            if name in seen or len(seen) >= 16:
+                raise RuntimeError('Cyclic or excessive SAM source alias: ' + rel)
+            seen.add(name)
+            member = members.get(name)
+            if member is None:
+                raise RuntimeError('Source archive omitted a pinned file or alias target: ' + rel)
+            if member.isfile():
+                if member.size != manifest['files_bytes'][rel]:
+                    raise RuntimeError('SAM source member differs from pinned size: ' + rel)
+                selected[rel] = member
+                break
+            if not (member.issym() or member.islnk()):
+                raise RuntimeError('SAM source alias must end at a regular file: ' + rel)
+            target = member.linkname
+            if not target or target.startswith('/') or '\\' in target:
+                raise RuntimeError('Unsafe SAM source alias target: ' + rel)
+            # Symlinks are relative to their directory; hardlinks use archive names.
+            name = posixpath.normpath(posixpath.join(posixpath.dirname(name), target)
+                                     if member.issym() else target)
+            if not name.startswith(root + '/'):
+                raise RuntimeError('SAM source alias escapes the fixed archive root: ' + rel)
+    for rel, member in selected.items():
+        # member is now a unique regular entry. Output names come only from pins.
+        with tar.extractfile(member) as stream:
+            _copy_verified(stream, destination/rel, manifest['files_sha256'][rel],
+                           manifest['files_bytes'][rel])
+
+
 def setup(cache,offline_from=None):
     cache=Path(cache).expanduser().resolve();cache.mkdir(parents=True,exist_ok=True)
     manifest=paths.asset_manifest()
@@ -56,7 +110,7 @@ def setup(cache,offline_from=None):
             source=Path(offline_from)/'sam2/source'/rel
             with source.open('rb') as stream:_copy_verified(stream,dest/rel,sha,source_manifest['files_bytes'][rel])
     elif not all((dest/rel).is_file() and paths.digest(dest/rel)==sha for rel,sha in required.items()):
-        # Only named regular files are extracted. Tar member paths never choose output paths.
+        # Only pinned regular bytes are copied; archive links never reach disk.
         with tempfile.TemporaryFile() as archive:
             with urllib.request.urlopen(source_manifest['url'],timeout=60) as response:
                 size=0
@@ -66,17 +120,7 @@ def setup(cache,offline_from=None):
                     archive.write(block)
             archive.seek(0)
             with tarfile.open(fileobj=archive,mode='r:gz') as tar:
-                selected={}
-                for member in tar.getmembers():
-                    parts=PurePosixPath(member.name).parts
-                    rel='/'.join(parts[1:])
-                    if rel in required:
-                        if not member.isfile() or rel in selected:raise RuntimeError('Unsafe or repeated source archive entry')
-                        selected[rel]=member
-                if set(selected)!=set(required):raise RuntimeError('Source archive omitted a pinned file')
-                for rel,member in selected.items():
-                    with tar.extractfile(member) as stream:
-                        _copy_verified(stream,dest/rel,required[rel],source_manifest['files_bytes'][rel])
+                _install_sam_source(tar,dest,source_manifest)
     return check(cache)
 
 

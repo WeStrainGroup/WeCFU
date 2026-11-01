@@ -29,6 +29,9 @@ dev = ["pytest", "httpx", "build"]
 # Source and weights are installed separately by python -m wecfu.setup_models.
 models = [
     "numpy==2.5.4",
+    "scipy==1.18.1",
+    "scikit-image==0.26.0",
+    "opencv-python-headless==5.0.0.93",
     "pillow==13.0.0",
     "torch==2.14.1",
     "torchvision==0.29.1",
