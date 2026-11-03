@@ -23,6 +23,18 @@ PUBLIC_JSON = {
     "wecfu/server/fusion_dino/loading-metadata.json",
     "wecfu/server/fusion_dino/runtime-contract.json",
 }
+REQUIRED_PRODUCT_FILES = {
+    "wecfu/setup_models.py", "wecfu/runtime_paths.py",
+    "wecfu/server/app.py", "wecfu/server/web.py",
+    "wecfu/server/sam_runtime.py", "wecfu/server/sam_worker.py",
+    "wecfu/server/sam_warm_pool.py", "wecfu/experiments/segmentation.py",
+    "wecfu/server/static/index.html", "wecfu/server/static/app.js",
+    "wecfu/server/static/styles.css", "wecfu/server/static/i18n.js",
+    "wecfu/server/static/param_controls.js", "wecfu/server/static/reference_controls.js",
+    "wecfu/server/static/model_preview_controls.js", "wecfu/server/static/review_queue_controls.js",
+    "wecfu/server/static/workflow_controls.js", "wecfu/server/static/default_batch.js",
+    "wecfu/server/static/serial_batch.js",
+}
 SOURCE_TOP = {
     "pyproject.toml", "MANIFEST.in", "README.md", "README_HF.md", "INSTALL.md",
     "USAGE.md", "SHARE.md", "CHANGELOG.md", "LICENSE", "NOTICE",
@@ -144,7 +156,7 @@ def audit(path: Path):
         assert_member(name, content, kind)
     missing = PUBLIC_JSON - seen
     assert not missing, f"Required runtime resources missing: {sorted(missing)}"
-    for required in ("wecfu/server/static/index.html", "wecfu/setup_models.py", "wecfu/runtime_paths.py"):
+    for required in sorted(REQUIRED_PRODUCT_FILES):
         assert required in seen, f"Required product code missing: {required}"
     assert any(name.endswith("THIRD_PARTY_NOTICES.md") for name in seen), "Third-party notices missing"
     assert any(name.endswith("Apache-2.0.txt") for name in seen), "Apache license missing"
@@ -177,16 +189,20 @@ def test_public_runtime_resources_exist_and_are_sanitized():
         assert_member(name, (root / name).read_bytes(), "wheel")
 
 
+def _synthetic_wheel(path, *, omit=()):
+    with zipfile.ZipFile(path, "w") as out:
+        for name in PUBLIC_JSON:
+            out.writestr(name, "{}")
+        for name in sorted(REQUIRED_PRODUCT_FILES - set(omit)):
+            out.writestr(name, "synthetic product code")
+        out.writestr("wecfu-1.2.0.dist-info/licenses/THIRD_PARTY_NOTICES.md", "test")
+        out.writestr("wecfu-1.2.0.dist-info/licenses/LICENSES/Apache-2.0.txt", "test")
+
+
 def test_built_archive_contract_detects_missing_runtime_and_private_files(tmp_path):
     import pytest
     wheel = tmp_path / "synthetic.whl"
-    with zipfile.ZipFile(wheel, "w") as out:
-        for name in PUBLIC_JSON:
-            out.writestr(name, "{}")
-        for name in ("wecfu/server/static/index.html", "wecfu/setup_models.py", "wecfu/runtime_paths.py"):
-            out.writestr(name, "")
-        out.writestr("wecfu-1.2.0.dist-info/licenses/THIRD_PARTY_NOTICES.md", "test")
-        out.writestr("wecfu-1.2.0.dist-info/licenses/LICENSES/Apache-2.0.txt", "test")
+    _synthetic_wheel(wheel)
     assert audit(wheel) > 0
     with zipfile.ZipFile(wheel, "a") as out:
         out.writestr("wecfu/server/leaked_photo.jpg", b"synthetic forbidden bytes")
@@ -196,6 +212,26 @@ def test_built_archive_contract_detects_missing_runtime_and_private_files(tmp_pa
         out.writestr("wecfu/server/static/index.html", "")
     with pytest.raises(AssertionError, match="runtime resources missing"):
         audit(wheel)
+
+
+def test_archive_rejects_missing_warm_or_batch_implementation(tmp_path):
+    import pytest
+    wheel = tmp_path / "synthetic.whl"
+    for missing in (
+        "wecfu/server/sam_warm_pool.py",
+        "wecfu/server/static/default_batch.js",
+        "wecfu/server/static/serial_batch.js",
+    ):
+        _synthetic_wheel(wheel, omit={missing})
+        with pytest.raises(AssertionError, match="Required product code missing") as failure:
+            audit(wheel)
+        assert missing in str(failure.value)
+
+
+def test_required_product_files_exist_in_release_source():
+    root = Path(__file__).resolve().parents[1]
+    for name in REQUIRED_PRODUCT_FILES:
+        assert (root / name).is_file(), name
 
 
 if __name__ == "__main__":

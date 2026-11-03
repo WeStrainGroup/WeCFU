@@ -1,15 +1,15 @@
-# Install and run WeCFU 1.2.0
+# Install and run WeCFU 1.2.1
 
-## Full local installation: Fusion v2 and the review interface
+## Local installation with Ultra
 
-Use Python 3.12 in a dedicated environment. The fixed model runtime checks for
-Python 3.12; the core application alone supports Python 3.10+. Model execution supports Linux CPU and macOS (Apple MPS or explicitly selected
-CPU). Windows supports the core interface and classical/manual methods; the
-current model process monitor requires Linux or macOS. A failed
-model operation is reported, with no automatic change of device or algorithm.
+The application supports Python 3.10+. Ultra's fixed algorithm + SAM runtime
+requires **Python 3.12** and its pinned optional dependencies. Ultra currently
+runs on Linux CPU or macOS CPU/MPS. Windows supports Lite, Custom and manual
+marking; the model process monitor requires Linux or macOS. CUDA is not a
+supported device setting.
 
 ```sh
-conda create -n wecfu -c westraingroup -c conda-forge python=3.12 pip wecfu=1.2.0 -y
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 pip wecfu=1.2.1 -y
 conda activate wecfu
 ```
 
@@ -19,54 +19,67 @@ On **Linux CPU systems**, install the official CPU-only PyTorch wheels first:
 python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
 ```
 
-Then, on Linux or macOS, install the matching release's model extras and
-prepare its verified model cache:
+Then, on Linux or macOS:
 
 ```sh
-python -m pip install "wecfu[models] @ https://github.com/WeStrainGroup/WeCFU/releases/download/v1.2.0/wecfu-1.2.0-py3-none-any.whl"
+python -m pip install "wecfu[models] @ https://github.com/WeStrainGroup/WeCFU/releases/download/v1.2.1/wecfu-1.2.1-py3-none-any.whl"
 python -m wecfu.setup_models
 python -m wecfu.setup_models --check --runtime-check
 wecfu serve
 ```
 
-The direct wheel URL is intentional: it selects this project's GitHub release
-and installs the same application version with its optional model dependencies.
-No PyPI publication of WeCFU is required. Setup obtains about 1.36 GB of weights
-from their fixed official sources, plus the small tokenizer/source files. Allow
-several additional GB for dependencies and installation caches. Keep setup
-connected to the internet until it completes. Model inference itself uses the
-local cache and does not upload photographs to an inference service.
+The direct wheel URL installs this release and its optional dependencies; it
+does not require a PyPI release. Setup downloads and verifies the fixed public
+asset manifest. That manifest currently includes legacy Fusion/DINO assets as
+well as SAM: approximately 1.36 GB of weights plus source/tokenizer files.
+**Ultra does not run DINO.** Allow additional disk space for Python dependencies
+and installation caches. Downloads happen during setup, not during counting.
+Model requests use the local cache and do not upload photographs.
 
-The browser opens `http://127.0.0.1:8765`. `wecfu serve` preserves its local
-`./data` workspace across restarts. To select another workspace or avoid opening
-a browser automatically:
+The browser opens `http://127.0.0.1:8765`. The local `./data` workspace is preserved
+across restarts. To choose a workspace or suppress automatic browser opening:
 
 ```sh
 wecfu serve --root /path/to/workspace --no-open
 ```
 
-On Windows, use Anaconda Prompt. Importing files by drag and drop is supported;
-local-path ingestion falls back to copying when symlinks are unavailable.
-
-## Core application without model downloads
+## Core application without models
 
 ```sh
-conda create -n wecfu-core -c westraingroup -c conda-forge python=3.12 wecfu=1.2.0 -y
+conda create -n wecfu-core -c westraingroup -c conda-forge python=3.12 wecfu=1.2.1 -y
 conda activate wecfu-core
 wecfu serve
 ```
 
-This installs the interface, manual tools and explicitly selected classical
-methods. Default Fusion v2 remains unavailable until the model runtime and
-assets are installed. Its unavailability does not silently switch your chosen
-method or overwrite saved results.
+Choose **Lite** or **Custom** in the page. Both use traditional image processing
+without loading SAM. Manual marking is also available. Ultra remains the local
+default selection, but reports unavailable until its dependencies and assets are
+installed; it never silently substitutes a Lite result.
 
-## Install from a source checkout
+On Windows, use Anaconda Prompt for these core commands. Drag-and-drop import is
+supported; path import copies files if symbolic links are unavailable.
+
+## Upgrade an existing installation
+
+Export important results and stop the running server before upgrading. Keep the
+existing workspace; do not delete it to update the application.
+
+```sh
+conda activate wecfu
+conda install -c westraingroup -c conda-forge wecfu=1.2.1 -y
+```
+
+For an installation with Ultra, also install the matching `1.2.1` model-extra
+wheel shown above and run the asset/runtime check. Restart with the same
+`--root`, then reload existing browser tabs. Saved counts are not automatically
+rerun when the version or selected mode changes.
+
+## Install from source
 
 ```sh
 git clone https://github.com/WeStrainGroup/WeCFU.git
 cd WeCFU
-git checkout v1.2.0
+git checkout v1.2.1
 conda create -n wecfu-source -c conda-forge python=3.12 pip -y
 conda activate wecfu-source
 python -m pip install '.[models,dev]'
@@ -74,48 +87,60 @@ python -m wecfu.setup_models
 wecfu serve
 ```
 
-On a Linux CPU-only installation, install the two CPU wheels shown above before
-the extras command. Do not use `pip install sam2`: the supported SAM source is
-obtained at the exact revision by WeCFU's setup command.
+On Linux CPU, install the two CPU wheels first. For a core-only source install,
+use `python -m pip install '.[dev]'` and skip model setup. Do not use
+`pip install sam2`: WeCFU setup obtains the supported SAM source at a fixed
+revision.
 
-## Model cache and offline operation
+## Cache, device and worker settings
 
-Set `WECFU_MODEL_HOME` to select the shared model cache before running setup and
-the application. The default cache is `~/Library/Caches/WeCFU/models` on macOS
-and `$XDG_CACHE_HOME/wecfu/models` (normally `~/.cache/wecfu/models`) on Linux.
-The application reports an unavailable model if a required file is absent or
-has a different checksum. Setup refuses to overwrite a mismatched existing file.
+`WECFU_MODEL_HOME` selects the shared model cache. Its default is
+`~/Library/Caches/WeCFU/models` on macOS and `$XDG_CACHE_HOME/wecfu/models`
+(normally `~/.cache/wecfu/models`) on Linux. Missing or altered files make a
+model unavailable; setup refuses to overwrite a mismatched existing file.
 
 ```sh
 python -m wecfu.setup_models --cache-dir /path/to/model-cache
 python -m wecfu.setup_models --cache-dir /path/to/model-cache --check
 ```
 
-When using `--cache-dir`, also configure `WECFU_MODEL_HOME` to that directory for
-subsequent application runs. For an offline machine, transfer the verified model
-cache and install the pinned Python dependency wheels in advance, then run
-`--check` there. No input images or results belong in the model cache.
+When using `--cache-dir`, set `WECFU_MODEL_HOME` to the same directory for
+application runs. For offline use, transfer a verified cache and install the
+pinned dependency wheels in advance, then run `--check` on the target machine.
+Do not put photographs or results in the model cache.
 
-`WECFU_MODEL_PYTHON` can select the Python interpreter holding model dependencies;
-`WECFU_CV_PYTHON` can select the classical image-processing interpreter. Both
-default to the application's Python. `WECFU_SAM_DEVICE=cpu` explicitly requests
-CPU processing; `mps` requires a working Apple MPS device. Restart the application
-after changing these settings. `WECFU_ENABLE_FUSION_V2=0` explicitly disables the
-fusion option.
+- `WECFU_MODEL_PYTHON` selects the interpreter with model dependencies;
+  `WECFU_CV_PYTHON` selects the image-processing interpreter. Both default to
+  the application's Python.
+- `WECFU_SAM_DEVICE=cpu` explicitly selects CPU. macOS defaults to `mps`, which
+  requires a working Apple MPS device. Linux defaults to CPU. There is no
+  automatic device fallback.
+- Warm SAM workers are enabled by default. They retain the loaded model between
+  requests, reducing repeated startup work; each photograph is processed anew.
+  Workers retire after idle time or a bounded number of requests. Set
+  `WECFU_SAM_WARM_WORKER=0` to restore the cold-process route without changing
+  recognition rules; `1` explicitly enables warm workers.
+
+Restart the server after changing these settings. Performance depends on the
+computer and photos. No universal minimum RAM or throughput is established.
+Requests have time and memory limits; these are process safeguards, not a
+minimum hardware specification. Lite is available when model execution is
+unsupported, too slow or too demanding.
 
 ## Count and review
 
-Declare the imported photo's view and check the medium boundary before a model
-request. Fusion v2 supports declared front/empty views; it rejects reverse or
-undeclared views. For an existing workspace image, use **More → Photo type**
-(**更多 → 照片类型**) to set or correct its declaration. This changes metadata
-only; it does not recount the image, replace saved markings, or confirm a human
-reference. Classical/manual methods can also be selected explicitly.
-Model candidates only replace markings when you apply
-them. Review corrections before exporting; ordinary saves do not create an
-independent human-reference annotation.
+Import photos, then choose **Recognize all** or **Recognize current**. Importing
+and opening photos do not run recognition, and no front/blank/back declaration
+is required. Accepting a view does not establish accuracy for every view or
+colony morphology.
 
-The local batch command uses the classical pipeline:
+Ultra and Lite batch recognition preserve existing results. Ultra previews an
+existing photo's replacement before adoption; new untouched photos can be
+recognized and saved directly. Custom uses applied traditional-algorithm
+settings and can recount machine-only results, while skipping protected manual
+work in a batch. See [USAGE.md](USAGE.md) for controls, protection and exports.
+
+The command-line batch command remains a separate classical pipeline:
 
 ```sh
 wecfu batch /path/to/photos --out /path/to/results
@@ -123,18 +148,20 @@ wecfu batch /path/to/photos --out /path/to/results
 
 ## Troubleshooting
 
-- **Model unavailable:** run `python -m wecfu.setup_models --check --runtime-check` in the active
-  environment, confirm the `models` extra is installed, and check the cache path.
-- **Unsupported Python:** create the Python 3.12 environment above; do not relax
-  dependency pins to make an older interpreter install the model stack.
-- **Model error or timeout:** the interface shows the failure without returning
-  a partial or substituted count. Saved markings remain intact. Check the
-  specific error and available memory before trying again.
-- **Old appearance in an already open tab:** reload the page after upgrading and
-  restarting the service.
-- **Hosted session:** export before leaving. The Hugging Face workspace is
-  temporary and separate from local workspaces.
+- **Ultra unavailable:** check that the model extra is installed in Python 3.12,
+  confirm the cache path, and run `python -m wecfu.setup_models --check --runtime-check`.
+- **MPS unavailable:** explicitly select `WECFU_SAM_DEVICE=cpu`, then restart,
+  or choose Lite. The app does not change devices on your behalf.
+- **Model error or timeout:** inspect the reported error. A failed request does
+  not return a substituted count; existing marks remain intact. A batch reports
+  completed, skipped and failed photos separately.
+- **Imported photos have no counts:** import only adds them. Choose
+  **Recognize all** in the sidebar.
+- **Old page after upgrading:** restart the server, then reload the browser tab.
+- **Hosted session:** the hosted app defaults to the web classical workflow;
+  Detailed check can explicitly preview SAM for one photo when available.
+  Uploads go to its server and the workspace is temporary; export before leaving.
 
-Public sources, fixed model identities and upstream notices are documented in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Development validation uses
-synthetic workspaces; it should not use or alter a user's working directory.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for public sources and
+licenses. Development acceptance checks should use an isolated workspace,
+not an active user's working directory.

@@ -116,16 +116,23 @@ def build_web_app(sessions_root: Path) -> FastAPI:
     """Build the multi-visitor web app."""
     sessions_root = sessions_root.expanduser().resolve()
     sessions_root.mkdir(parents=True, exist_ok=True)
+    app = build_app(get_root=lambda: _root_cv.get(), web_mode=True)
+    application_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        task = asyncio.create_task(_cleanup_loop(sessions_root))
-        try:
-            yield
-        finally:
-            task.cancel()
+        # Preserve the core app's worker shutdown while adding session cleanup.
+        async with application_lifespan(app):
+            task = asyncio.create_task(_cleanup_loop(sessions_root))
+            try:
+                yield
+            finally:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
-    app = build_app(get_root=lambda: _root_cv.get(), web_mode=True)
     app.router.lifespan_context = lifespan
     app.add_middleware(SessionMiddleware, sessions_root=sessions_root)
     return app

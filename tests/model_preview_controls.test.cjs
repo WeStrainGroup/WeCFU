@@ -92,7 +92,7 @@ test('trial displays separate candidates without changing marks, history, counts
   assert.equal(body.expected_image_sha256, hash);
   assert.deepEqual(body.model_params, {plate_inset: .82});
   assert.equal(view.element('model-empty-warning').hidden, false);
-  assert.equal(view.element('count-badge').textContent, '2 cfuSuffix');
+  assert.equal(view.element('count-badge').textContent, 'modelTemporary · 0');
   assert.equal(view.element('reference-summary-status').textContent, 'referenceVerified');
   assert.equal(view.element('reference-confirmed').checked, false);
   assert.equal(view.element('btn-reference-save').disabled, true);
@@ -660,10 +660,13 @@ function fusionV2UI({web = false, sourceView = 'main'} = {}) {
     detections: [{id: 1, cx: 150, cy: 125, r: 12, score: .8, accepted: true, source: 'cv'},
       {id: 2, cx: 195, cy: 145, r: 9, score: .8, accepted: true, source: 'cv'}]});
   view.context.fixtureWeb = web; view.context.fixtureView = sourceView;
-  view.run(`state.config = {web_mode: fixtureWeb, default_model: FUSION_V2_ENGINE, default_model_fallback: false,
+  view.run(`state.config = {web_mode: fixtureWeb, builtin_algorithms:['baseline',ENHANCED_ENGINE], default_count_engine:ENHANCED_ENGINE, default_model:null, default_model_fallback:false,
     models: {fusion_v2: {engine: FUSION_V2_ENGINE, enabled: true, available: true,
-      model_sha256: fixtureCandidate.model_sha256, recipe_id: fixtureCandidate.recipe_id}}};
+      model_sha256: fixtureCandidate.model_sha256, recipe_id: fixtureCandidate.recipe_id},
+      sam2: {engine: SAM_ENGINE, enabled: true, available: true,
+        model_sha256: 'c'.repeat(64), recipe_id: modelHelpers.SAM_RECIPE}}};
     state.doc.plate_manual = false; state.doc.reviewed = false; state.sourceView = fixtureView;
+    state.imageList = [{name: state.imageName, counted: true}];
     state.workflow.enabled = true; state.workflow.kind = 'default';
     syncWorkflowRoute(); updateControls();`);
   return view;
@@ -682,13 +685,11 @@ function useRealRawLoader(view) {
     };`);
 }
 
-test('public Fusion v2 default accepts actual public schema for main and blank without private provenance', async () => {
+test('explicit public Fusion v2 refinement accepts actual public schema for main and blank without private provenance', async () => {
   for (const sourceView of ['main', 'blank']) {
     const view = fusionV2UI({sourceView}), before = plain(view.run('snapshot()'));
-    assert.equal(view.element('method-select').value, helpers.FUSION_V2_ENGINE);
-    assert.equal(view.element('model-warning').textContent, 'fusionV2Warning');
-    assert.equal(view.element('btn-model-preview').disabled, false);
-    await view.run('recognizeCurrent()');
+    assert.equal(view.element('method-select').value, view.run('workflowBuiltinEngine()'));
+    await view.run('runModelPreview({engine:FUSION_V2_ENGINE})');
     assert.equal(view.run('modelCandidateCurrent()'), true);
     assert.deepEqual(plain(view.run('snapshot()')), before);
     const body = JSON.parse(view.run('requests[0].options.body'));
@@ -702,15 +703,14 @@ test('public Fusion v2 default accepts actual public schema for main and blank w
   }
 });
 
-test('public default never falls back when Fusion is unavailable, back/unknown or manually cropped', async () => {
+test('explicit refinement never falls back when Fusion is unavailable, back/unknown or manually cropped', async () => {
   for (const mutation of ["state.sourceView = 'unknown';", "state.sourceView = 'back';",
     'state.doc.plate_manual = true;', 'state.config.models.fusion_v2.available = false;',
     'state.config.models.fusion_v2.enabled = false;', 'delete state.config.models.fusion_v2;']) {
     const view = fusionV2UI({web:true}), before = plain(view.run('snapshot()'));
     view.run(`${mutation} syncWorkflowRoute(); updateControls();`);
-    assert.equal(view.element('method-select').value, helpers.FUSION_V2_ENGINE);
-    assert.equal(view.element('btn-model-preview').disabled, true);
-    await view.run('recognizeCurrent()');
+    assert.equal(view.element('method-select').value, view.run('workflowBuiltinEngine()'));
+    await view.run('runModelPreview({engine:FUSION_V2_ENGINE})');
     assert.equal(view.run('requests.length'), 0, mutation);
     assert.deepEqual(plain(view.run('state.detections')), before.detections);
     assert.equal(view.run('saves.length'), 0);
@@ -723,7 +723,7 @@ test('public Fusion v2 rejects malformed source-view and fixed numerical provena
     {DINO_dedup_fraction:.01}, {ROI_max_radial:.9}, {feature_projection:[0,1,2,3]}]) {
     const view = fusionV2UI({web:true}), before = plain(view.run('snapshot()'));
     Object.assign(view.context.fixtureCandidate.fusion_provenance, change);
-    await view.run('runModelPreview()');
+    await view.run('runModelPreview({engine:FUSION_V2_ENGINE})');
     assert.equal(view.run('state.modelPreview.candidate'), null, JSON.stringify(change));
     assert.deepEqual(plain(view.run('snapshot()')), before);
     assert.equal(view.run('saves.length'), 0);
@@ -733,7 +733,7 @@ test('public Fusion v2 rejects malformed source-view and fixed numerical provena
 test('Web Fusion preview uses display_context raw bytes and explicit apply/Undo preserves public provenance', async () => {
   const view = fusionV2UI({web:true}), before = plain(view.run('snapshot()'));
   useRealRawLoader(view);
-  await view.run('runModelPreview()');
+  await view.run('runModelPreview({engine:FUSION_V2_ENGINE})');
   assert.equal(view.run('modelCandidateCurrent()'), true);
   assert.match(view.run('requests[0].url'), /\/raw\?display_context=true$/);
   assert.equal(view.run('requests[0].options.cache'), 'no-store');
@@ -758,7 +758,7 @@ test('Web Fusion preview uses display_context raw bytes and explicit apply/Undo 
 
 test('Web uncertain Fusion apply reloads display_context and retains Undo only for matching receipt', async () => {
   const view = fusionV2UI({web:true}), before = plain(view.run('snapshot()'));
-  useRealRawLoader(view); await view.run('runModelPreview()');
+  useRealRawLoader(view); await view.run('runModelPreview({engine:FUSION_V2_ENGINE})');
   view.run(`jsonRequest = async () => { throw new TypeError('synthetic lost response'); };`);
   await view.run('applyModelPreview()');
   assert.equal(view.run('applyPending()'), true);
@@ -778,7 +778,7 @@ test('Web uncertain Fusion apply reloads display_context and retains Undo only f
 });
 
 test('local model raw context stays protected while Web SAM is explicitly supported', async () => {
-  const local = fusionV2UI(); useRealRawLoader(local); await local.run('runModelPreview()');
+  const local = fusionV2UI(); useRealRawLoader(local); await local.run('runModelPreview({engine:FUSION_V2_ENGINE})');
   assert.match(local.run('requests[0].url'), /\/raw\?reference_context=true$/);
   assert.equal(local.run('modelCandidateCurrent()'), true);
   const web = samUI(); web.run('state.config.web_mode=true; updateControls();');
@@ -789,7 +789,7 @@ test('local model raw context stays protected while Web SAM is explicitly suppor
 
 test('view designation mutation clears a candidate and a late response cannot restore it', async () => {
   const view = fusionV2UI({web:true});
-  await view.run('runModelPreview()');
+  await view.run('runModelPreview({engine:FUSION_V2_ENGINE})');
   view.run(`$('current-source-view').value='back';
     jsonRequest=async (url,method,body)=>{requests.push({url,method,body});return {source_sha256:fixtureHash,view:body.view,declared:true};};`);
   await view.run('changeSourceView()');
@@ -800,7 +800,7 @@ test('view designation mutation clears a candidate and a late response cannot re
   assert.equal(view.run('saves.length'), 0);
   const race = fusionV2UI({web:true});
   race.run(`let finishPublic; request=async()=>new Promise(resolve=>{finishPublic=resolve;});`);
-  const pending = race.run('runModelPreview()'); await new Promise(resolve=>setImmediate(resolve));
+  const pending = race.run('runModelPreview({engine:FUSION_V2_ENGINE})'); await new Promise(resolve=>setImmediate(resolve));
   race.run(`$('current-source-view').value='blank';
     jsonRequest=async()=>({source_sha256:fixtureHash,view:'blank',declared:true});`);
   await race.run('changeSourceView()');
@@ -808,4 +808,80 @@ test('view designation mutation clears a candidate and a late response cannot re
   assert.equal(race.run('state.modelPreview.candidate'), null);
   assert.equal(race.run('state.sourceView'), 'blank');
   assert.equal(race.run('saves.length'), 0);
+});
+
+
+function publicSamUI(options={}) {
+  const view=fusionV2UI(options);
+  view.context.fixtureCandidate=candidate({engine:helpers.SAM_ENGINE,recipe_id:helpers.SAM_RECIPE,
+    model_sha256:'c'.repeat(64),model_params:{plate_inset:.95}});
+  return view;
+}
+
+test('refinement pins SAM through preview and adoption; default returns to builtin and saved provenance stays SAM', async()=>{
+  const view=publicSamUI(), before=plain(view.run('snapshot()'));
+  assert.equal(view.element('method-select').value,'component_watershed_v1');
+  await view.run('refineCurrent()');
+  assert.equal(view.run('state.modelPreview.engine'),helpers.SAM_ENGINE);
+  assert.equal(view.run('modelCandidateCurrent()'),true);
+  for(const id of ['btn-recognize-all','btn-recognize-current','btn-refine-current'])
+    assert.equal(view.element(id).disabled,true);
+  view.run('syncWorkflowRoute(); updateControls();');
+  assert.equal(view.run('selectedModelEngine()'),helpers.SAM_ENGINE);
+  view.run(`jsonRequest=async()=>({...snapshot(),revision:18,detections:fixtureCandidate.detections,
+    machine_count_initial:1,count_engine:SAM_ENGINE,count_model:{recipe_id:modelHelpers.SAM_RECIPE},count_params:null});`);
+  await view.run('applyModelPreview()');
+  assert.equal(view.run('state.modelPreview.engine'),null);
+  assert.equal(view.run('selectedModelEngine()'),null);
+  assert.equal(view.element('method-select').value,'component_watershed_v1');
+  assert.equal(view.run('state.doc.count_engine'),helpers.SAM_ENGINE);
+  assert.equal(view.element('saved-source-visible').textContent,'currentSavedSourcesamSavedSource');
+  assert.equal(view.element('btn-recognize-all').disabled,false);
+  view.run('undo()'); assert.deepEqual(plain(view.run('snapshot()')),before);
+});
+
+test('discarding SAM refinement or failed preview returns to pure algorithm without changing saved work', async()=>{
+  const view=publicSamUI(),before=plain(view.run('snapshot()'));
+  await view.run('refineCurrent()'); view.run('clearModelPreview(); updateControls();');
+  assert.equal(view.run('selectedModelEngine()'),null);
+  assert.equal(view.element('btn-recognize-all').disabled,false);
+  view.run(`request=async()=>{throw Error('synthetic refinement failure');};`);
+  await view.run('refineCurrent()');
+  assert.equal(view.run('selectedModelEngine()'),helpers.SAM_ENGINE);
+  assert.match(view.element('model-message').textContent,/synthetic refinement failure/);
+  assert.equal(view.element('btn-model-discard').hidden,false);
+  assert.equal(view.element('btn-recognize-all').disabled,true);
+  view.run('clearModelPreview();updateControls();');
+  assert.equal(view.element('method-select').value,'component_watershed_v1');
+  assert.equal(view.element('btn-recognize-current').disabled,false);
+  assert.deepEqual(plain(view.run('snapshot()')),before);
+  assert.equal(view.run('saves.length'),0);
+});
+
+test('unavailable SAM disables only refinement and cannot fall back to Fusion', async()=>{
+  const view=publicSamUI(),before=plain(view.run('snapshot()'));
+  view.run('state.config.models.sam2.available=false;updateControls();');
+  assert.equal(view.element('btn-recognize-current').disabled,false);
+  assert.equal(view.element('btn-recognize-all').disabled,false);
+  assert.equal(view.element('btn-refine-current').disabled,true);
+  await view.run('refineCurrent()');
+  assert.equal(view.run('requests.length'),0);
+  assert.equal(view.run('selectedModelEngine()'),null);
+  assert.deepEqual(plain(view.run('snapshot()')),before);
+});
+
+test('explicit detailed check runs algorithm plus SAM for all photo metadata and manual circles without DINO', async()=>{
+  for(const sourceView of ['main','blank','back','unknown']) {
+    const view=publicSamUI({sourceView}),before=plain(view.run('snapshot()'));
+    view.run('state.doc.plate_manual=true;updateControls();');
+    const beforeWithPlate=plain(view.run('snapshot()'));
+    assert.equal(view.element('btn-refine-current').disabled,false);
+    await view.run('refineCurrent()');
+    assert.equal(view.run('modelCandidateCurrent()'),true,sourceView);
+    assert.equal(view.run('requests.length'),1);
+    assert.deepEqual(JSON.parse(view.run('requests[0].options.body')),{
+      engine:helpers.SAM_ENGINE,expected_revision:17,expected_image_sha256:hash,model_params:{}});
+    assert.deepEqual(plain(view.run('snapshot()')),beforeWithPlate);
+    assert.equal(view.run('saves.length'),0);
+  }
 });

@@ -5,10 +5,10 @@
   else root.WECFU_WORKFLOW_CONTROLS = helpers;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
-  function defaultEngine() {
-    // The released Default profile always means Fusion v2. Missing models are
-    // reported to the user; Custom is the explicit traditional alternative.
-    return 'sam_dino_fusion_local_v2';
+  function defaultEngine(config = {}) {
+    // Default intent is explicit; unavailable SAM must not silently fall back.
+    if (config.web_mode) return 'baseline';
+    return config.default_model === 'sam2_local_v1' ? 'sam2_local_v1' : 'component_watershed_v1';
   }
   function ownsArrowKeys(target) {
     if (!target) return false;

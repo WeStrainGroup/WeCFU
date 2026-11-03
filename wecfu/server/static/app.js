@@ -15,7 +15,7 @@ const ASSISTED_ENGINE = 'sam2_cv_frozen_v1';
 const ENHANCED_ENGINE = 'component_watershed_v1';
 const LEGACY_DEFAULTS = {plate_inset: 0.82, min_value: 200, max_saturation: 60,
   min_circularity: 0.55, min_area_frac: 0.0001, peak_min_distance: 15};
-const DEFAULTS = {...LEGACY_DEFAULTS, plate_inset: 0.88, max_saturation: 100};
+const DEFAULTS = {...LEGACY_DEFAULTS, plate_inset: 0.95, max_saturation: 100};
 const PRESETS = {
   white: {...DEFAULTS},
   legacy: {...LEGACY_DEFAULTS},
@@ -35,11 +35,13 @@ const state = {
   saveQueues: new Map(), saveDirHandle: null, cancelRun: false, frame: null, backdrop: null,
   backdropDirty: true, imageSourceHash: null,
   reference: {key: null, envelope: null, loading: false, error: '', geometry: null, token: 0, controller: null},
+  batchRun: {active: false, report: null},
+  bulkSelection: {enabled: false, batch: null, names: new Set()},
   modelPreview: {candidate: null, signature: null, token: 0, controller: null, timer: null,
-    loading: false, error: '', message: '', pendingApply: null},
+    loading: false, error: '', message: '', pendingApply: null, engine: null},
   review: {requested: false, id: null, queue: null, signature: null, loading: false, error: '',
     refreshing: null, statuses: new Map()},
-  workflow: {enabled: false, kind: 'default', customParams: null},
+  workflow: {enabled: false, kind: 'default', customParams: null, appliedCustomParams: null, adjustmentsOpen: false},
 };
 const enc = encodeURIComponent;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -76,13 +78,43 @@ function restrictedReview() { return manualOnlyReview() || assistedFrozenReview(
 function normalWorkflow() { return state.workflow.enabled && !reviewMode(); }
 function customWorkflow() { return normalWorkflow() && state.workflow.kind === 'custom'; }
 function workflowBuiltinEngine() { return builtinEngines().includes(ENHANCED_ENGINE) ? ENHANCED_ENGINE : defaultBuiltinEngine(); }
+function workflowDefaultEngine() {
+  return state.workflow.kind !== 'classical' && !state.config?.web_mode && state.config?.default_model === SAM_ENGINE
+    ? SAM_ENGINE : workflowBuiltinEngine();
+}
 function syncWorkflowRoute() {
   if (!normalWorkflow()) return;
-  $('method-select').value = customWorkflow() ? workflowBuiltinEngine() : workflowHelpers.defaultEngine({
-    fusionV2: modelCapability(FUSION_V2_ENGINE), sam: modelCapability(SAM_ENGINE), builtin: defaultBuiltinEngine()});
+  $('method-select').value = customWorkflow() ? workflowBuiltinEngine()
+    : state.modelPreview.engine || workflowDefaultEngine();
 }
 function workflowParams() {
   return customWorkflow() ? state.workflow.customParams || DEFAULTS : DEFAULTS;
+}
+function appliedCustomParams() { return {...(state.workflow.appliedCustomParams || DEFAULTS)}; }
+function customDraftPending() {
+  const draft = state.workflow.customParams || DEFAULTS, applied = appliedCustomParams();
+  return Object.keys(DEFAULTS).some(key => Number(draft[key]) !== Number(applied[key]));
+}
+function applyCustomSettings() {
+  if (!customWorkflow() || state.loading || state.busy || state.crop || previewActive()) return;
+  // Commit a number being edited before capturing the recipe. This never changes image state.
+  for (const [key, spec] of Object.entries(paramControls.SPECS)) {
+    if (key === 'radius') continue;
+    const input = $(`v-${spec.id}`);
+    if (input.dataset.edited === '1') commitSliderValue(key);
+    if (input.getAttribute('aria-invalid') === 'true') { setStatus(t('normalizedValueInvalid'), true); return; }
+  }
+  state.workflow.customParams = {...paramsBody()};
+  state.workflow.appliedCustomParams = {...state.workflow.customParams};
+  state.workflow.adjustmentsOpen = false;
+  clearPreview(); updateControls(); draw(); focusCanvas(); setStatus(t('customSettingsApplied'));
+}
+function toggleAdjustmentPanel() {
+  if (!customWorkflow() || state.loading || state.busy || state.crop || previewActive()) return;
+  state.workflow.adjustmentsOpen = !state.workflow.adjustmentsOpen;
+  if (state.workflow.adjustmentsOpen) { $('custom-settings').open = true; fillParams(workflowParams()); }
+  else clearPreview();
+  updateControls(); draw(); refreshMaskPreview(); focusCanvas();
 }
 function modalOpen() { return !$('modal-backdrop').hidden || !$('export-backdrop').hidden; }
 function focusCanvas({preserveEditing = false} = {}) {
@@ -138,7 +170,15 @@ function methodForDocument(doc) {
   if (modelHelpers?.isModelEngine?.(saved) && !reviewMode() && modelCapability(saved).enabled) return saved;
   return defaultBuiltinEngine();
 }
-function selectedModelEngine() { return modelHelpers?.isModelEngine?.($('method-select').value) ? $('method-select').value : null; }
+function selectedModelEngine() {
+  const engine = normalWorkflow() && !customWorkflow() && state.modelPreview.engine
+    ? state.modelPreview.engine : $('method-select').value;
+  return modelHelpers?.isModelEngine?.(engine) ? engine : null;
+}
+function previewActive() {
+  const trial = state.modelPreview;
+  return Boolean(trial.engine || trial.candidate || trial.loading || trial.pendingApply);
+}
 function modelCapability(engine = selectedModelEngine()) {
   return modelHelpers?.capability?.(state.config, engine) || {enabled: false, available: false};
 }
@@ -306,19 +346,23 @@ function updateControls() {
   for (const id of ['btn-clear', 'btn-fit', 'btn-crop', 'btn-remove-image', 'notes-input']) $(id).disabled = !active || locked;
   $('btn-undo').disabled = !active || locked || !state.history.length;
   $('current-source-view').disabled = !active || locked;
+  $('source-view-metadata').hidden = normalWorkflow();
   $('btn-rerun').disabled = restrictedReview() || !active || locked || state.doc?.mode === 'manual' || modelMethod();
   $('btn-apply-params').disabled = $('btn-rerun').disabled;
   if (restrictedReview()) $('mode-select').value = manualOnlyReview() ? 'manual' : 'auto';
   $('mode-select').disabled = locked || restrictedReview();
   for (const id of [...Object.values(PARAM_IDS), ...Object.values(paramControls.SPECS).map(spec => `s-${spec.id}`), 'preset-select', 'p-radius', 'p-preview', 'btn-defaults']) $(id).disabled = locked;
-  for (const id of ['btn-add-images', 'btn-ingest', 'import-view']) $(id).disabled = locked;
+  for (const id of ['btn-add-images', 'btn-ingest']) $(id).disabled = locked;
   $('btn-run').disabled = locked || !state.imageList.length || $('mode-select').value === 'manual' || modelMethod();
   $('p-preview').disabled = locked;
   for (const id of ['btn-export-csv', 'btn-export-zip']) $(id).disabled = locked || !state.imageList.length;
   const index = state.imageList.findIndex(row => row.name === state.imageName);
   $('btn-prev').disabled = locked || index <= 0;
   $('btn-next').disabled = locked || !state.imageList.length || index >= state.imageList.length - 1;
-  $('count-badge').textContent = manualOnlyReview() ? `${state.detections.length} ${t('manualMarksSuffix')}`
+  const displayedCandidate = displayedModelCandidate();
+  $('count-badge').textContent = displayedCandidate
+    ? `${t(samMethod() ? 'samPreview' : 'modelTemporary')} · ${displayedCandidate.candidate_count}`
+    : manualOnlyReview() ? `${state.detections.length} ${t('manualMarksSuffix')}`
     : hasCount() ? `${state.detections.length} ${t('cfuSuffix')}` : t('notProcessed');
   $('count-source').hidden = manualOnlyReview();
   $('count-source').textContent = state.doc?.counted ? t(state.doc.count_engine === ASSISTED_ENGINE ? 'assistedSavedSource' : state.doc.count_engine === SAM_ENGINE ? 'samSavedSource' : state.doc.count_engine === FUSION_V2_ENGINE ? 'fusionV2SavedSource' : state.doc.count_engine === FUSION_ENGINE ? 'fusionSavedSource' : state.doc.count_engine === MODEL_ENGINE ? 'modelSavedSource' : state.doc.count_engine === ENHANCED_ENGINE ? 'enhancedSavedSource' : 'modelBaselineSource') : '';
@@ -345,22 +389,52 @@ function updateControls() {
   updateReferenceControls();
   updateReviewControls();
   updateWorkflowControls();
+  updateBulkSelectionControls();
   for (const spec of Object.values(paramControls.SPECS)) $(`v-${spec.id}`).disabled = $(`s-${spec.id}`).disabled;
 }
 function updateWorkflowControls() {
   if (!state.workflow.enabled) return;
   const normal = normalWorkflow(), custom = customWorkflow();
+  const defaultSam = !custom && workflowDefaultEngine() === SAM_ENGINE;
+  const defaultCapability = modelCapability(SAM_ENGINE);
+  const defaultUnavailable = defaultSam && (!defaultCapability.enabled || !defaultCapability.available);
   const locked = state.loading || state.busy || Boolean(state.crop) || applyPending() || reviewBlocked();
+  const offersSamDefault = !state.config?.web_mode && state.config?.default_model === SAM_ENGINE;
+  $('profile-option-default').textContent = t(offersSamDefault ? 'profileDefault' : 'profileClassical');
+  $('profile-option-classical').hidden = !offersSamDefault;
   $('recognition-profile-control').hidden = !normal;
   $('recognition-profile').value = state.workflow.kind;
-  $('recognition-profile').disabled = locked;
+  $('recognition-profile').disabled = locked || previewActive();
   $('viewer').classList.toggle('workflow-default', normal && !custom);
   $('viewer').classList.toggle('workflow-custom', custom);
   $('custom-settings').hidden = normal && !custom;
-  $('btn-recognize-current').hidden = !normal || custom;
-  $('btn-recognize-current').disabled = !editable() || state.doc?.mode === 'manual'
-    || (modelMethod() && $('btn-model-preview').disabled);
-  $('btn-custom-run-all').hidden = !custom;
+  $('btn-recognize-all').hidden = !normal;
+  $('btn-recognize-all').disabled = locked || previewActive() || !state.imageList.length
+    || $('mode-select').value === 'manual' || defaultUnavailable;
+  $('batch-hint').textContent = defaultUnavailable ? t('modelUnavailable') : '';
+  $('batch-hint').hidden = !defaultUnavailable;
+  $('btn-adjustments-toggle').hidden = !custom;
+  $('btn-adjustments-toggle').disabled = locked || previewActive();
+  $('btn-adjustments-toggle').textContent = t(state.workflow.adjustmentsOpen ? 'collapseAdjustments' : customDraftPending() ? 'adjustmentsPending' : 'openAdjustments');
+  $('btn-adjustments-toggle').setAttribute('aria-expanded', String(custom && state.workflow.adjustmentsOpen));
+  if (custom) $('btn-apply-params').disabled = locked || previewActive();
+  $('btn-recognize-current').hidden = !normal;
+  $('btn-recognize-current').disabled = !editable() || previewActive() || state.doc?.mode === 'manual' || defaultUnavailable;
+  const refineCapability = modelCapability(SAM_ENGINE);
+  $('btn-refine-current').hidden = !normal || custom || defaultSam;
+  $('btn-refine-current').disabled = !editable() || previewActive() || state.doc?.mode === 'manual'
+    || !refineCapability.enabled || !refineCapability.available;
+  $('recognition-route').hidden = true;
+  $('recognition-mode-info').hidden = !normal;
+  $('mode-info-title').textContent = t(custom ? 'profileCustom' : defaultSam ? 'profileDefault' : 'profileClassical');
+  $('mode-info-description').textContent = t(custom ? 'modeInfoCustom' : defaultSam ? 'modeInfoUltra' : 'modeInfoLite');
+  $('recognition-route').textContent = t(custom ? 'customRoute' : defaultSam ? 'defaultRoute' : 'classicalRoute');
+  $('recognition-route').title = t(custom ? 'customRouteHint' : defaultSam ? 'defaultRouteHint' : 'classicalRouteHint');
+  $('saved-source-visible').hidden = !normal || !state.doc?.counted;
+  $('saved-source-visible').textContent = state.doc?.counted
+    ? `${t('currentSavedSource')}${$('count-source').textContent}` : '';
+  $('btn-refine-current').title = t('refineCurrentHint');
+  $('btn-custom-run-all').hidden = true;
   $('btn-custom-run-all').disabled = !custom || locked || !state.imageList.length || $('mode-select').value === 'manual';
   $('mode-hint').hidden = normal && (state.doc?.mode || $('mode-select').value) !== 'manual';
   const presetLabel = $('preset-select').closest('label');
@@ -372,7 +446,7 @@ function updateWorkflowControls() {
     $('btn-model-preview').hidden = true;
     $('params-hint').textContent = custom ? t('customDraftHint') : '';
   }
-  if ($('workflow-hint')) $('workflow-hint').textContent = custom ? t('customBatchProtectedHint') : '';
+  if ($('workflow-hint')) { $('workflow-hint').textContent = ''; $('workflow-hint').hidden = normal; }
   updateAdjustmentPanel();
 }
 function updateAdjustmentPanel() {
@@ -383,7 +457,9 @@ function updateAdjustmentPanel() {
     if (custom) destination.appendChild(settings);
     else destination.insertBefore(settings, $('reference-panel'));
   }
-  $('adjustments-panel').hidden = !custom;
+  const expanded = custom && state.workflow.adjustmentsOpen;
+  $('adjustments-panel').hidden = !expanded;
+  $('viewer').classList.toggle('adjustments-open', Boolean(expanded));
   $('dropzone').hidden = reviewMode();
   $('image-list').hidden = false;
 }
@@ -398,18 +474,31 @@ function initializeWorkflow() {
   syncWorkflowRoute();
 }
 function changeRecognitionProfile() {
-  if (!normalWorkflow() || state.busy || state.loading || state.crop || applyPending()) return;
+  if (!normalWorkflow() || state.busy || state.loading || state.crop || previewActive()) return;
   clearModelPreview(); clearPreview(); clearReferenceConfirmation();
-  state.workflow.kind = $('recognition-profile').value === 'custom' ? 'custom' : 'default';
+  $('recognition-mode-info').open = false;
+  state.workflow.kind = ['custom', 'classical'].includes($('recognition-profile').value) ? $('recognition-profile').value : 'default';
   state.workflow.customParams ||= {...DEFAULTS};
+  state.workflow.appliedCustomParams ||= {...DEFAULTS};
   syncWorkflowRoute(); fillParams(workflowParams());
+  state.workflow.adjustmentsOpen = customWorkflow();
   if (customWorkflow()) $('custom-settings').open = true;
   updateControls(); draw(); refreshMaskPreview();
 }
 async function recognizeCurrent() {
-  if (!normalWorkflow() || customWorkflow() || !editable() || state.doc.mode === 'manual') return;
-  // The capability choice is stable for this session. An image-specific failure is never a fallback trigger.
-  return modelMethod() ? runModelPreview() : recount();
+  if (!normalWorkflow() || !editable() || previewActive() || state.doc.mode === 'manual') return;
+  syncWorkflowRoute();
+  if (selectedModelEngine() === SAM_ENGINE) {
+    // New images use the same protected, serial adoption path as Recognize all.
+    // Existing work gets a preview and explicit adoption instead of silent replacement.
+    if (!window.WECFU_DEFAULT_BATCH.protection(state.doc)) return countDefaultBatch({onlyCurrent: true});
+    return runModelPreview({engine: SAM_ENGINE});
+  }
+  return recount();
+}
+async function refineCurrent() {
+  if (!normalWorkflow() || customWorkflow() || !editable() || previewActive() || state.doc.mode === 'manual') return;
+  return runModelPreview({engine: SAM_ENGINE});
 }
 function syncSliders() {
   let outside = false;
@@ -437,6 +526,7 @@ function sliderChanged(key, keyboardRawValue = null) {
   const spec = paramControls.SPECS[key];
   // Only the edited raw field changes. Rendering sliders must never quantize saved values.
   $(`p-${spec.id}`).value = keyboardRawValue ?? paramControls.fromNormalized(key, Number($(`s-${spec.id}`).value));
+  $(`v-${spec.id}`).removeAttribute('aria-invalid');
   syncSliders();
   if (key !== 'radius') { $('preset-select').value = 'custom'; parametersChanged(key); }
   else updateControls();
@@ -472,7 +562,10 @@ function sliderKeyDown(key, event) {
 }
 function fillParams(params = DEFAULTS) {
   const values = {...DEFAULTS, ...params};
-  for (const [key, id] of Object.entries(PARAM_IDS)) $(id).value = values[key];
+  for (const [key, id] of Object.entries(PARAM_IDS)) {
+    $(id).value = values[key];
+    $(`v-${id.slice(2)}`).removeAttribute('aria-invalid');
+  }
   $('preset-select').value = Object.keys(PRESETS).find(name =>
     Object.keys(DEFAULTS).every(key => Number(values[key]) === PRESETS[name][key])) || 'custom';
   syncSliders();
@@ -626,6 +719,8 @@ function renderImageList() {
     row.classList.toggle('reviewed', Boolean(item.reviewed || item.notes?.trim()));
     row.classList.toggle('visited', Boolean(item.viewed));
     row.classList.toggle('has-notes', Boolean(item.notes));
+    const check = document.createElement('span'); check.className = 'row-select-check'; check.setAttribute('aria-hidden', 'true');
+    row.appendChild(check);
     const flag = document.createElement('span'); flag.className = 'row-flag';
     flag.title = t(imageFlagKey(item));
     const name = document.createElement('span'); name.className = 'row-name';
@@ -634,12 +729,13 @@ function renderImageList() {
     count.textContent = manualOnlyReview() ? '' : counted ? item.count : '–';
     row.append(flag, name, count);
     if (reviewMode()) { const status = document.createElement('span'); status.className = 'review-item-status'; row.append(status); }
-    row.addEventListener('click', safeAction(() => selectImage(item.name)));
+    row.addEventListener('click', safeAction(() => state.bulkSelection.enabled ? toggleBulkImage(item.name) : selectImage(item.name)));
     fragment.appendChild(row);
   }
   $('image-list').replaceChildren(fragment);
   updateSelectedRows({reveal: true});
   updateReviewControls();
+  updateBulkSelectionControls();
 }
 async function loadImages() {
   if (reviewMode()) { await refreshReviewQueue(); return; }
@@ -930,6 +1026,12 @@ function modelCandidateCurrent() {
     engine: selectedModelEngine(), model_sha256: capability.model_sha256, recipe_id: capability.recipe_id,
   }));
 }
+function displayedModelCandidate() {
+  return modelMethod() && !state.crop && modelCandidateCurrent() ? state.modelPreview.candidate : null;
+}
+function previewCanvasReadOnly() {
+  return Boolean(state.modelPreview.loading || state.modelPreview.candidate);
+}
 function clearModelPreview(message = '') {
   const trial = state.modelPreview;
   if (trial.pendingApply) return; // An unknown write outcome must be resolved before any new edits.
@@ -937,7 +1039,8 @@ function clearModelPreview(message = '') {
   trial.controller?.abort();
   if (trial.timer !== null) clearTimeout(trial.timer);
   Object.assign(trial, {candidate: null, signature: null, token: trial.token + 1,
-    controller: null, timer: null, loading: false, error: '', message});
+    controller: null, timer: null, loading: false, error: '', message, engine: null});
+  syncWorkflowRoute();
   if (hadPreview) draw();
 }
 function updateModelControls() {
@@ -969,10 +1072,10 @@ function updateModelControls() {
   const replacementHint = $('model-tools').querySelector?.('.model-replacement');
   if (replacementHint) replacementHint.hidden = normalWorkflow() && !trial.candidate && !trial.pendingApply;
   $('btn-model-preview').disabled = !enabled || !capability.available || !selected || manual || manualFusionPlate || unsupportedView || locked || !state.doc || !state.img || trial.loading || !roiValid;
-  $('btn-model-discard').disabled = locked || (!trial.candidate && !trial.loading);
+  $('btn-model-discard').disabled = locked || (!trial.candidate && !trial.loading && !trial.engine);
   $('btn-model-apply').disabled = locked || manual || manualFusionPlate || unsupportedView || !enabled || !capability.available || !selected || !roiValid || !modelCandidateCurrent();
   if (normalWorkflow()) {
-    $('btn-model-discard').hidden = Boolean(trial.pendingApply) || (!trial.candidate && !trial.loading);
+    $('btn-model-discard').hidden = Boolean(trial.pendingApply) || (!trial.candidate && !trial.loading && !trial.engine);
     $('btn-model-apply').hidden = Boolean(trial.pendingApply) || !trial.candidate;
   }
   $('btn-model-retry').hidden = !trial.pendingApply || Boolean(trial.pendingApply.needsReload);
@@ -980,7 +1083,7 @@ function updateModelControls() {
   $('btn-model-reload').hidden = !trial.pendingApply?.uncertain;
   $('btn-model-reload').disabled = state.busy || !trial.pendingApply?.uncertain;
   $('model-count').textContent = trial.candidate
-    ? `${t('modelTemporary')}: ${trial.candidate.candidate_count} · ${t('modelCurrent')}: ${state.detections.length} · ${t('modelNotAdopted')}` : '';
+    ? `${t(samMethod() ? 'samPreview' : 'modelTemporary')}: ${trial.candidate.candidate_count} · ${t('modelCurrent')}: ${state.detections.length} · ${t('modelNotAdopted')}` : '';
   $('model-empty-warning').hidden = !trial.candidate || trial.candidate.candidate_count !== 0;
   $('model-message').textContent = trial.error || (trial.pendingApply ? t('modelApplying') : trial.loading ? t('modelLoading')
     : manual ? t('modelManual') : unsupportedView ? t('sourceViewRequired') : manualFusionPlate ? t('fusionAutomaticPlateRequired') : !capability?.available
@@ -996,9 +1099,20 @@ function changeMethod() {
   updateControls();
   if (!modelMethod()) refreshMaskPreview();
 }
-async function runModelPreview() {
-  if ($('btn-model-preview').disabled || !editable() || !modelMethod() || state.doc.mode === 'manual') return;
-  clearModelPreview(); clearPreview(); cancelGesture();
+async function runModelPreview({engine = selectedModelEngine()} = {}) {
+  if (!editable() || state.doc.mode === 'manual' || state.modelPreview.loading || applyPending()) return;
+  const capability = modelCapability(engine);
+  if (!capability.enabled || !capability.available) { setStatus(t('modelUnavailable'), true); updateControls(); return; }
+  if (normalWorkflow() && !customWorkflow()) {
+    if (previewActive()) return;
+    // Keep an explicit refinement engine through validation, adoption and uncertain-write retries.
+    // Synchronizing the default route must not relabel or invalidate that candidate.
+    state.modelPreview.engine = engine; syncWorkflowRoute(); updateControls();
+  }
+  if ($('btn-model-preview').disabled || !modelMethod()) { clearModelPreview(); updateControls(); return; }
+  clearModelPreview();
+  if (normalWorkflow() && !customWorkflow()) { state.modelPreview.engine = engine; syncWorkflowRoute(); }
+  clearPreview(); cancelGesture();
   const trial = state.modelPreview, token = trial.token, key = keyFor(), url = imageURL('/model-preview'), rawURL = imageURL('/raw');
   const controller = new AbortController(); trial.controller = controller; trial.loading = true;
   clearReferenceConfirmation(); updateControls();
@@ -1139,6 +1253,17 @@ function draw() {
   if (state.frame !== null) return;
   state.frame = requestAnimationFrame(() => { state.frame = null; paint(); });
 }
+// Saved and temporary colony marks share source colors; preview state stays separate.
+function paintColonyMark(ctx, detection, showLabel = false) {
+  const ink = detection.source === 'manual' ? 'rgba(117,149,166,0.9)' : 'rgba(183,131,150,0.9)';
+  ctx.setLineDash([]);
+  ctx.strokeStyle = ink; ctx.lineWidth = 2.75 / state.view.zoom;
+  ctx.beginPath(); ctx.arc(detection.cx, detection.cy, Math.max(detection.r, 2), 0, Math.PI * 2); ctx.stroke();
+  if (showLabel) {
+    ctx.fillStyle = ink;
+    ctx.fillText(String(detection.id), detection.cx + detection.r + 3, detection.cy - 3);
+  }
+}
 function paint() {
   resizeCanvas();
   const canvas = $('canvas'), ctx = canvas.getContext('2d');
@@ -1195,32 +1320,15 @@ function paint() {
   }
   ctx.lineWidth = 2 / state.view.zoom; ctx.font = `${13 / state.view.zoom}px sans-serif`;
   const width = canvas.width / ratio(), height = canvas.height / ratio();
-  for (const detection of state.detections) {
+  // A model preview is a separate result, not additional marks on the saved
+  // algorithm result. Saved marks remain intact and reappear when discarded.
+  const candidate = displayedModelCandidate();
+  const displayedDetections = candidate ? candidate.detections : state.detections;
+  for (const detection of displayedDetections) {
     const x = detection.cx * state.view.zoom + state.view.ox, y = detection.cy * state.view.zoom + state.view.oy;
     const radius = detection.r * state.view.zoom;
     if (x + radius < 0 || x - radius > width || y + radius < 0 || y - radius > height) continue;
-    const manual = detection.source === 'manual';
-    const ink = manual ? 'rgba(117,149,166,0.9)' : 'rgba(183,131,150,0.9)';
-    ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(detection.cx, detection.cy, Math.max(detection.r, 2), 0, Math.PI * 2);
-    ctx.strokeStyle = ink; ctx.lineWidth = 2.75 / state.view.zoom; ctx.stroke();
-    ctx.setLineDash([]);
-    if (state.detections.length < 1200 || state.view.zoom > 0.4) {
-      const label = String(detection.id), tx = detection.cx + detection.r + 3, ty = detection.cy - 3;
-      ctx.fillStyle = ink; ctx.fillText(label, tx, ty);
-    }
-  }
-  const candidate = state.modelPreview.candidate;
-  if (candidate && modelMethod() && !state.crop) {
-    ctx.strokeStyle = '#444444'; ctx.lineWidth = 2 / state.view.zoom;
-    ctx.setLineDash([5 / state.view.zoom, 4 / state.view.zoom]);
-    for (const detection of candidate.detections) {
-      const x = detection.cx * state.view.zoom + state.view.ox, y = detection.cy * state.view.zoom + state.view.oy;
-      const radius = detection.r * state.view.zoom;
-      if (x + radius < 0 || x - radius > width || y + radius < 0 || y - radius > height) continue;
-      ctx.beginPath(); ctx.arc(detection.cx, detection.cy, Math.max(detection.r, 2), 0, Math.PI * 2); ctx.stroke();
-    }
-    ctx.setLineDash([]);
+    paintColonyMark(ctx, detection, !candidate && (state.detections.length < 1200 || state.view.zoom > 0.4));
   }
   ctx.restore();
   const gesture = state.gesture;
@@ -1250,7 +1358,7 @@ function onPointerDown(event) {
   const gesture = {sx: x, sy: y, x, y, ix, iy, ox: state.view.ox, oy: state.view.oy, id: event.pointerId, kind: 'pending'};
   state.gesture = gesture;
   $('canvas').setPointerCapture(event.pointerId);
-  if (event.metaKey || event.ctrlKey || event.button === 1) gesture.kind = 'pan';
+  if (previewCanvasReadOnly() || event.metaKey || event.ctrlKey || event.button === 1) gesture.kind = 'pan';
   else if (state.crop) {
     gesture.cropStart = {...state.crop};
     gesture.kind = Math.abs(Math.hypot(ix - state.crop.cx, iy - state.crop.cy) - state.crop.r) * state.view.zoom < 16 ? 'crop-resize' : 'crop-move';
@@ -1263,6 +1371,7 @@ function onPointerMove(event) {
   const gesture = state.gesture;
   if (!gesture || event.pointerId !== gesture.id) return;
   const [x, y] = pointerPosition(event); gesture.x = x; gesture.y = y;
+  if (previewCanvasReadOnly()) gesture.kind = 'pan';
   const distance = Math.hypot(x - gesture.sx, y - gesture.sy);
   if (gesture.kind === 'pending' && distance > 6) { clearTimeout(gesture.timer); gesture.kind = 'select'; }
   if (gesture.kind === 'pan') {
@@ -1281,6 +1390,9 @@ function onPointerUp(event) {
   const gesture = state.gesture;
   if (!gesture || event.pointerId !== gesture.id) return;
   const [x, y] = pointerPosition(event), [ix, iy] = screenToImg(x, y);
+  // A preview can arrive after pointerdown. Never edit saved marks that are
+  // currently hidden behind the separate candidate view.
+  if (previewCanvasReadOnly()) gesture.kind = 'pan';
   if (gesture.kind === 'select') {
     const [startX, startY] = screenToImg(gesture.sx, gesture.sy);
     const keep = state.detections.filter(d => !(d.cx >= Math.min(startX, ix) && d.cx <= Math.max(startX, ix) && d.cy >= Math.min(startY, iy) && d.cy <= Math.max(startY, iy)));
@@ -1299,7 +1411,7 @@ function onPointerUp(event) {
 }
 function onContextMenu(event) {
   event.preventDefault();
-  if (!editable()) return;
+  if (!editable() || previewCanvasReadOnly()) return;
   const [x, y] = screenToImg(...pointerPosition(event));
   const hit = findHit(x, y);
   if (hit) { remember(); state.detections = state.detections.filter(d => d.id !== hit.id); changed(); }
@@ -1383,7 +1495,7 @@ function clearPreview({keepImage = false} = {}) {
   setPreviewStatus('');
 }
 function refreshMaskPreview() {
-  if (restrictedReview() || (normalWorkflow() && !customWorkflow()) || modelMethod() || applyPending() || reviewBlocked() || !$('p-preview').checked || !state.doc || state.crop) { clearPreview(); return; }
+  if (restrictedReview() || (normalWorkflow() && (!customWorkflow() || !state.workflow.adjustmentsOpen)) || modelMethod() || applyPending() || reviewBlocked() || !$('p-preview').checked || !state.doc || state.crop) { clearPreview(); return; }
   let params; try { params = paramsBody(); } catch (_) { return; }
   const plate = {...state.plate};
   const signature = JSON.stringify(['foreground-mint-v1', keyFor(), plate.cx, plate.cy, plate.r,
@@ -1417,8 +1529,10 @@ function refreshMaskPreview() {
 async function recount() {
   if (restrictedReview() || !editable() || state.doc.mode === 'manual' || modelMethod()) return;
   clearModelPreview();
-  const params = paramsBody(), engine = selectedBuiltinEngine();
-  let url = `${imageURL('/run')}?engine=${enc(engine)}`;
+  const params = normalWorkflow() ? (customWorkflow() ? appliedCustomParams() : {...DEFAULTS}) : paramsBody(), engine = selectedBuiltinEngine();
+  const hash = state.imageSourceHash;
+  if (!/^[a-f0-9]{64}$/.test(hash || '')) throw new Error(t('recognitionSourceUnavailable'));
+  let url = `${imageURL('/run')}?engine=${enc(engine)}&expected_image_sha256=${hash}`;
   state.busy = true; updateControls(); setStatus(t('statusProcessing')); clearPreview();
   try {
     await flushEdits();
@@ -1448,7 +1562,7 @@ async function recount() {
 async function countAll() {
   if (normalWorkflow()) {
     if (customWorkflow()) return countCustomBatch();
-    setStatus(t('defaultBatchCustomOnly')); return;
+    return countDefaultBatch();
   }
   if (reviewMode() || !state.batch || state.loading || state.busy || state.crop || applyPending() || modelMethod() || $('mode-select').value === 'manual') return;
   clearModelPreview();
@@ -1475,11 +1589,86 @@ async function countAll() {
     setStatus(`${t(state.cancelRun ? 'countStopped' : 'statusDone')} · ${count} ${t('countCompleted')} · ${skipped} ${t('countSkipped')}`);
   } finally { state.busy = false; $('btn-stop-run').hidden = true; updateControls(); refreshMaskPreview(); }
 }
+function renderBatchReport(report) {
+  const records = report.results, total = report.total;
+  const completed = records.filter(r => r.status === 'completed').length;
+  const skipped = records.filter(r => r.status === 'skipped').length;
+  const failed = records.filter(r => ['failed', 'uncertain'].includes(r.status)).length;
+  const remaining = total - records.length;
+  const text = `${t(state.batchRun.active ? 'statusProcessing' : report.stopped ? 'countStopped' : 'statusDone')} · ${completed} ${t('countCompleted')} · ${skipped} ${t('countSkipped')} · ${failed} ${t('customBatchFailed')}${remaining ? ` · ${remaining} ${t('batchRemaining')}` : ''}`;
+  $('batch-report').hidden = false;
+  $('batch-report-summary').textContent = text;
+  const fragment = document.createDocumentFragment();
+  for (const record of records) {
+    const row = document.createElement('li');
+    const reason = record.status === 'completed' ? '' : record.reason;
+    const labels = {completed: 'countCompleted', skipped: 'countSkipped', failed: 'customBatchFailed', uncertain: 'batchUncertain'};
+    row.textContent = `${record.name} · ${t(labels[record.status])}${reason ? ` · ${batchReason(reason)}` : ''}`;
+    fragment.appendChild(row);
+  }
+  $('batch-report-items').replaceChildren(fragment);
+  if (!state.batchRun.active) setStatus(text, failed > 0);
+}
+function batchReason(reason) {
+  const keys = {already_counted: 'batchAlreadyCounted', existing_marks: 'batchProtected',
+    human_work: 'batchProtected', manual_mode: 'batchProtected', reference: 'batchProtected', source_view: 'sourceViewRequired'};
+  return keys[reason] ? t(keys[reason]) : reason;
+}
+async function countDefaultBatch({onlyCurrent = false} = {}) {
+  if (!normalWorkflow() || customWorkflow() || !state.batch || !state.imageList.length || state.loading || state.busy
+    || state.crop || previewActive() || $('mode-select').value === 'manual') return;
+  const engine = workflowDefaultEngine(), params = {...DEFAULTS};
+  const useSam = engine === SAM_ENGINE, capability = clone(modelCapability(SAM_ENGINE));
+  if (useSam && (!capability.enabled || !capability.available)) { setStatus(t('modelUnavailable'), true); return; }
+  const batch = state.batch, items = state.imageList.filter(item => !onlyCurrent || item.name === state.imageName).map(item => ({name: item.name}));
+  const report = {results: [], stopped: false, total: items.length};
+  clearModelPreview(); clearPreview(); state.busy = true; state.cancelRun = false;
+  state.batchRun = {active: true, report}; updateControls(); $('btn-stop-run').hidden = false;
+  $('batch-report').open = false;
+  try {
+    await flushEdits();
+    const outcome = await window.WECFU_SERIAL_BATCH.run(items, {
+      shouldStop: () => state.cancelRun,
+      onProgress: ({index, total, item}) => setStatus(`${t('statusProcessing')} ${index + 1}/${total} · ${item.name}`),
+      runItem: async ({name}) => {
+        const result = await window.WECFU_DEFAULT_BATCH[useSam ? 'recognize' : 'recognizeBuiltin']({batch, name, engine, params, capability, webMode: Boolean(state.config?.web_mode)}, {
+          json: jsonRequest,
+          source: async url => (await loadPlateImage(url)).sourceHash,
+          valid: modelHelpers.valid,
+          uuid: () => crypto.randomUUID(),
+        });
+        // The report contains names/outcomes only; marks and provenance stay in saved image state.
+        report.results.push({name, status: result.status, reason: result.reason});
+        if (result.status === 'completed') {
+          if (batch === state.batch && name === state.imageName) {
+            if (state.imageSourceHash === result.hash) {
+              state.history.push(clone(result.before)); if (state.history.length > 80) state.history.shift();
+              trackRevision(result.doc); adopt(result.doc); draw();
+            } else emptyViewer(); // Never draw marks on source bytes that have changed.
+          }
+          await loadImages().catch(error => { report.listError = error.message; });
+        } else if (result.status === 'uncertain' && batch === state.batch && name === state.imageName) {
+          // Do not allow stale local edits to be saved over a possibly successful adoption.
+          emptyViewer();
+        }
+        renderBatchReport(report);
+        return {stop: result.stop === true};
+      },
+    });
+    report.stopped = outcome.stopped;
+  } finally {
+    state.busy = false; state.batchRun.active = false; $('btn-stop-run').hidden = true;
+    state.workflow.lastBatchReport = report;
+    updateControls(); renderBatchReport(report); refreshMaskPreview();
+  }
+}
+
 async function countCustomBatch() {
   if (!customWorkflow() || !state.batch || state.loading || state.busy || state.crop || applyPending()
     || $('mode-select').value === 'manual') return;
   // One immutable recipe for this entire explicit batch, including after adopting a current-image result.
-  const params = {...paramsBody()}, batch = state.batch, engine = workflowBuiltinEngine(), items = [...state.imageList];
+  const params = appliedCustomParams(), batch = state.batch, engine = workflowBuiltinEngine();
+  const items = state.imageList.map(item => ({...item}));
   const report = {completed: [], protected: [], failed: [], canceled: false};
   clearModelPreview(); clearPreview(); state.busy = true; state.cancelRun = false;
   updateControls(); $('btn-stop-run').hidden = false;
@@ -1488,6 +1677,7 @@ async function countCustomBatch() {
     for (let index = 0; index < items.length; index++) {
       if (state.cancelRun) { report.canceled = true; break; }
       const name = items[index].name;
+      let submitted = false;
       setStatus(`${t('statusProcessing')} ${index + 1}/${items.length} · ${name}`);
       try {
         const existing = await jsonRequest(imageURL('/detections', batch, name)).catch(error => {
@@ -1503,18 +1693,27 @@ async function countCustomBatch() {
         if (state.cancelRun) { report.canceled = true; break; }
         const revision = existing?.revision ?? 0;
         if (!Number.isInteger(revision)) throw new Error(t('modelMissingRevision'));
-        const data = await jsonRequest(`${imageURL('/run', batch, name)}?engine=${enc(engine)}&expected_revision=${revision}&protect_existing_edits=true`, 'POST', params);
+        const hash = (await loadPlateImage(imageURL('/raw', batch, name))).sourceHash;
+        if (!/^[a-f0-9]{64}$/.test(hash || '')) throw new Error(t('recognitionSourceUnavailable'));
+        submitted = true;
+        const data = await jsonRequest(`${imageURL('/run', batch, name)}?engine=${enc(engine)}&expected_revision=${revision}&protect_existing_edits=true&expected_image_sha256=${hash}`, 'POST', params);
         report.completed.push(name);
-        if (name === state.imageName) {
+        if (batch === state.batch && name === state.imageName && state.imageSourceHash === hash) {
           // Undo restores exactly the server state replaced by this run, including a newer
           // machine-only result from another tab, not this tab's older displayed snapshot.
           if (existing) { state.history.push(clone(existing)); if (state.history.length > 80) state.history.shift(); }
           else state.history = [];
           trackRevision(data); adopt(data); draw();
-        }
+        } else if (batch === state.batch && name === state.imageName) emptyViewer();
       } catch (error) {
         // A concurrent edit or newly created reference is protected under the server lock. Never retry it.
-        (error.status === 409 ? report.protected : report.failed).push({name, reason: error.message});
+        const uncertain = submitted && (!Number.isInteger(error.status) || error.status >= 500);
+        (error.status === 409 ? report.protected : report.failed).push({name, reason: error.message, ...(uncertain ? {uncertain: true} : {})});
+        if (uncertain) {
+          // A lost response may follow a successful write. Stop rather than overwrite from stale state.
+          if (batch === state.batch && name === state.imageName) emptyViewer();
+          report.canceled = true; break;
+        }
       }
     }
     await loadImages();
@@ -1532,7 +1731,7 @@ async function ingestPath(path) {
   state.busy = true; updateControls(); setStatus(t('statusIngesting'));
   try {
     await flushEdits();
-    const result = await jsonRequest('/api/ingest', 'POST', {paths: [path], view: $('import-view').value, ...(state.batch ? {batch: state.batch} : {})});
+    const result = await jsonRequest('/api/ingest', 'POST', {paths: [path], view: 'unknown', ...(state.batch ? {batch: state.batch} : {})});
     state.batch = result.batch; await loadImages(); setStatus(t('statusDone'));
   } finally { state.busy = false; updateControls(); }
 }
@@ -1545,7 +1744,7 @@ async function uploadFiles(fileList) {
   const batch = state.batch || `upload_${new Date().toISOString().replace(/[:.]/g, '-')}`;
   try {
     await flushEdits();
-    const data = new FormData(); data.append('batch', batch); data.append('view', $('import-view').value);
+    const data = new FormData(); data.append('batch', batch); data.append('view', 'unknown');
     for (const file of files) data.append('files', file);
     const result = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/upload');
@@ -1571,6 +1770,108 @@ async function walkDir(entry, files) {
     for (const child of entries) await walkDir(child, files);
   }
 }
+function bulkSelectionLocked() {
+  return reviewMode() || state.busy || state.loading || Boolean(state.crop) || applyPending() || state.modelPreview.loading;
+}
+function updateBulkSelectionControls() {
+  const selection = state.bulkSelection;
+  if (selection.batch !== state.batch || reviewMode()) {
+    selection.batch = state.batch; selection.enabled = false; selection.names.clear();
+  }
+  const available = new Set(state.imageList.map(item => item.name));
+  for (const name of selection.names) if (!available.has(name)) selection.names.delete(name);
+  const locked = bulkSelectionLocked();
+  $('bulk-image-tools').hidden = reviewMode() || !state.imageList.length;
+  $('btn-bulk-select').disabled = locked;
+  $('btn-bulk-select').textContent = t(selection.enabled ? 'finishSelection' : 'bulkDeleteMode');
+  $('btn-bulk-select').setAttribute('aria-expanded', String(selection.enabled));
+  $('bulk-selection-actions').hidden = !selection.enabled;
+  $('bulk-selected-count').textContent = t('imagesSelected').replace('{count}', selection.names.size);
+  const allSelected = state.imageList.length > 0 && selection.names.size === state.imageList.length;
+  $('btn-bulk-all').disabled = locked || !selection.enabled || !state.imageList.length;
+  $('btn-bulk-all').setAttribute('aria-checked', allSelected ? 'true' : selection.names.size ? 'mixed' : 'false');
+  $('btn-bulk-all').title = t(allSelected ? 'selectNoImages' : 'selectAllImages');
+  $('btn-bulk-delete').disabled = locked || !selection.names.size;
+  $('image-list').classList.toggle('bulk-selecting', selection.enabled);
+  for (const row of $('image-list').children) {
+    const checked = selection.names.has(row.dataset.name);
+    row.classList.toggle('bulk-selected', selection.enabled && checked);
+    const check = row.querySelector('.row-select-check');
+    if (check) { check.hidden = !selection.enabled; check.textContent = checked ? '✓' : ''; }
+    if (selection.enabled) {
+      row.setAttribute('role', 'checkbox'); row.setAttribute('aria-checked', String(checked)); row.disabled = locked;
+    } else {
+      row.removeAttribute('role'); row.removeAttribute('aria-checked'); row.disabled = false;
+    }
+  }
+}
+function toggleBulkSelection() {
+  if (bulkSelectionLocked() || !state.imageList.length) return;
+  state.bulkSelection.enabled = !state.bulkSelection.enabled;
+  state.bulkSelection.batch = state.batch; state.bulkSelection.names.clear();
+  updateBulkSelectionControls();
+}
+function toggleBulkImage(name) {
+  if (bulkSelectionLocked() || !state.bulkSelection.enabled || !state.imageList.some(item => item.name === name)) return;
+  const names = state.bulkSelection.names;
+  if (names.has(name)) names.delete(name); else names.add(name);
+  updateBulkSelectionControls();
+}
+function selectBulkImages(all) {
+  if (bulkSelectionLocked() || !state.bulkSelection.enabled) return;
+  state.bulkSelection.names = new Set(all ? state.imageList.map(item => item.name) : []);
+  updateBulkSelectionControls();
+}
+function toggleAllBulkImages() {
+  const available = state.imageList.map(item => item.name);
+  selectBulkImages(!available.length || !available.every(name => state.bulkSelection.names.has(name)));
+}
+async function removeSelectedImages() {
+  if (bulkSelectionLocked() || !state.bulkSelection.enabled || !state.batch) return;
+  const batch = state.batch;
+  const names = state.imageList.filter(item => state.bulkSelection.names.has(item.name)).map(item => item.name);
+  if (!names.length) return;
+  const details = names.slice(0, 8).join('\n') + (names.length > 8 ? '\n…' : '');
+  if (!window.confirm(t('bulkDeleteConfirm').replace('{count}', names.length) + '\n\n' + details)) return;
+  clearModelPreview(); clearPreview();
+  state.busy = true; updateControls();
+  const report = {removed: [], failed: []};
+  let currentRemoved = false;
+  const oldIndex = state.imageList.findIndex(item => item.name === state.imageName);
+  try {
+    await flushEdits();
+    for (const name of names) {
+      setStatus(t('bulkDeleting').replace('{current}', report.removed.length + report.failed.length + 1).replace('{total}', names.length));
+      try {
+        await jsonRequest(imageURL('', batch, name), 'DELETE');
+      } catch (error) {
+        if (error.status !== 404) { report.failed.push({name, reason: error.message}); continue; }
+      }
+      report.removed.push(name);
+      state.saveQueues.delete(keyFor(batch, name));
+      state.bulkSelection.names.delete(name);
+      state.imageList = state.imageList.filter(item => item.name !== name);
+      if (name === state.imageName) { currentRemoved = true; emptyViewer(); }
+    }
+    if (!state.imageList.length || !state.bulkSelection.names.size) state.bulkSelection.enabled = false;
+    renderImageList();
+    // Refresh failure must not turn acknowledged removals back into local editable rows.
+    await loadImages().catch(error => { report.refreshError = error.message; });
+  } finally {
+    state.bulkSelection.lastReport = report;
+    state.busy = false; updateControls(); draw();
+  }
+  if (currentRemoved && state.imageList.length) {
+    await selectImage(state.imageList[Math.min(Math.max(oldIndex, 0), state.imageList.length - 1)].name)
+      .catch(error => { report.refreshError = error.message; });
+  }
+  const message = t('bulkDeleteDone').replace('{count}', report.removed.length)
+    + (report.failed.length ? ' · ' + t('bulkDeleteFailed').replace('{count}', report.failed.length) : '')
+    + (report.refreshError ? ' · ' + t('bulkRefreshFailed') : '');
+  setStatus(message, Boolean(report.failed.length || report.refreshError));
+  $('status').title = report.failed.map(item => `${item.name}: ${item.reason}`).join('\n');
+}
+
 async function removeImage() {
   if (reviewMode() || !editable()) return;
   const name = state.imageName, url = imageURL(), key = keyFor();
@@ -1648,6 +1949,7 @@ function populateLangSelect() {
 }
 function onKeyDown(event) {
   if (event.key === 'Escape') {
+    $('recognition-mode-info').open = false;
     cancelGesture(); if (state.crop) cancelCrop(); closeHelp();
     if (!state.busy) $('export-backdrop').hidden = true;
     return;
@@ -1666,8 +1968,11 @@ function wireUpHandlers() {
   const actions = {
     'btn-ingest': () => { const path = $('path-input').value.trim(); if (path) return ingestPath(path); },
     'btn-add-images': () => { if (!reviewMode()) $('file-input').click(); }, 'btn-remove-image': removeImage,
-    'btn-run': countAll, 'btn-stop-run': () => { state.cancelRun = true; },
-    'btn-rerun': recount, 'btn-apply-params': recount, 'btn-defaults': resetDefaults,
+    'btn-bulk-select': toggleBulkSelection, 'btn-bulk-all': toggleAllBulkImages,
+    'btn-bulk-delete': removeSelectedImages,
+    'btn-adjustments-toggle': toggleAdjustmentPanel,
+    'btn-run': countAll, 'btn-recognize-all': countAll, 'btn-stop-run': () => { state.cancelRun = true; setStatus(t('batchStopping')); },
+    'btn-rerun': recount, 'btn-apply-params': () => customWorkflow() ? applyCustomSettings() : recount(), 'btn-defaults': resetDefaults,
     'btn-undo': undo, 'btn-clear': clearAll, 'btn-fit': fitToCanvas,
     'btn-prev': () => moveSelection(-1), 'btn-next': () => moveSelection(1),
     'btn-crop': openCrop, 'btn-crop-apply': applyCrop, 'btn-crop-cancel': cancelCrop,
@@ -1689,6 +1994,7 @@ function wireUpHandlers() {
   };
   if (state.workflow.enabled) {
     actions['btn-recognize-current'] = recognizeCurrent;
+    actions['btn-refine-current'] = refineCurrent;
     actions['btn-custom-run-all'] = countAll;
     $('recognition-profile').addEventListener('change', safeAction(event => { changeRecognitionProfile(); focusAfterSelect(event.currentTarget || $('recognition-profile')); }));
   }
@@ -1758,7 +2064,7 @@ function wireUpHandlers() {
   new ResizeObserver(() => { resizeCanvas(); invalidateBackground(); }).observe($('canvas-wrap'));
   window.addEventListener('keydown', safeAction(onKeyDown));
   window.addEventListener('beforeunload', event => {
-    if (applyPending() || Array.from(state.saveQueues.values()).some(queue => queue.pending || queue.saving)) {
+    if (state.batchRun.active || applyPending() || Array.from(state.saveQueues.values()).some(queue => queue.pending || queue.saving)) {
       event.preventDefault(); event.returnValue = ''; // Warn for unsaved edits or an unresolved replacement.
     }
   });
@@ -1785,6 +2091,7 @@ async function applyServerConfig() {
   for (const key of Object.keys(DEFAULTS)) DEFAULTS[key] = Number.isFinite(configDefaults?.[key]) ? configDefaults[key] : fallback[key];
   PRESETS.white = {...DEFAULTS};
   state.workflow.customParams ||= {...DEFAULTS};
+  state.workflow.appliedCustomParams ||= {...DEFAULTS};
   if (normalWorkflow()) syncWorkflowRoute();
   else $('method-select').value = defaultBuiltinEngine();
   if (!state.doc) fillParams(normalWorkflow() ? workflowParams() : DEFAULTS);

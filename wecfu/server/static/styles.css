@@ -323,7 +323,7 @@ body:has(#viewer.review-mode) #export-menu { display: none; }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 
 /* Custom recognition: the photo list stays put, with adjustments beside the image. */
-#viewer.workflow-custom {
+#viewer.workflow-custom.adjustments-open {
   display: grid;
   grid-template-columns: 240px minmax(0,1fr);
   grid-template-rows: auto auto auto minmax(180px,1fr) auto auto auto auto;
@@ -331,14 +331,14 @@ body:has(#viewer.review-mode) #export-menu { display: none; }
   min-height: 0;
   overflow: hidden;
 }
-#viewer.workflow-custom #viewer-header { grid-area: heading; }
-#viewer.workflow-custom #view-tools { grid-area: tools; }
-#viewer.workflow-custom #crop-tools { grid-area: crop; }
-#viewer.workflow-custom #canvas-wrap { grid-area: photo; min-width: 0; min-height: 180px; margin-left: 16px; }
-#viewer.workflow-custom #legend { grid-area: legend; padding-left: 20px; }
-#viewer.workflow-custom #model-tools { grid-area: preview; min-width: 0; }
-#viewer.workflow-custom #params { grid-area: params; min-width: 0; padding-top: 0; padding-bottom: 0; max-height: 28vh; }
-#viewer.workflow-custom #notes-bar { grid-area: notes; min-width: 0; padding-left: 20px; }
+#viewer.workflow-custom.adjustments-open #viewer-header { grid-area: heading; }
+#viewer.workflow-custom.adjustments-open #view-tools { grid-area: tools; }
+#viewer.workflow-custom.adjustments-open #crop-tools { grid-area: crop; }
+#viewer.workflow-custom.adjustments-open #canvas-wrap { grid-area: photo; min-width: 0; min-height: 180px; margin-left: 16px; }
+#viewer.workflow-custom.adjustments-open #legend { grid-area: legend; padding-left: 20px; }
+#viewer.workflow-custom.adjustments-open #model-tools { grid-area: preview; min-width: 0; }
+#viewer.workflow-custom.adjustments-open #params { grid-area: params; min-width: 0; padding-top: 0; padding-bottom: 0; max-height: 28vh; }
+#viewer.workflow-custom.adjustments-open #notes-bar { grid-area: notes; min-width: 0; padding-left: 20px; }
 #adjustments-panel { grid-area: adjustments; min-width: 0; min-height: 0; display: flex; flex-direction: column; color: #444444; background: #fafafa; border-top: 1px solid #ececec; border-right: 1px solid #e5e5e5; overflow: hidden; }
 #adjustments-title { flex: 0 0 auto; margin: 0; padding: 14px 16px 10px; font-size: 11px; font-weight: 550; color: #727272; letter-spacing: .15px; }
 #adjustments-body { flex: 1; min-height: 0; padding: 0 16px 16px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #d0d0d0 transparent; }
@@ -397,25 +397,25 @@ body:has(#viewer.review-mode) #export-menu { display: none; }
 #adjustments-body #slider-range-warning { display: block; margin: 4px 0 0; color: #666666; }
 #adjustments-body #workflow-hint { margin: 12px 0 0; color: #808080; font-size: 9px; line-height: 1.55; }
 @media (max-width: 1050px) and (min-width: 761px) {
-  #viewer.workflow-custom { grid-template-columns: 210px minmax(0,1fr); }
+  #viewer.workflow-custom.adjustments-open { grid-template-columns: 210px minmax(0,1fr); }
   #adjustments-title { padding-left: 13px; padding-right: 13px; }
   #adjustments-body { padding-left: 13px; padding-right: 13px; }
 }
 @media (max-width: 760px) {
   /* Keep all three columns; below 520px the workspace scrolls horizontally. */
-  body:has(#viewer.workflow-custom) main { display: flex; min-height: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
-  body:has(#viewer.workflow-custom) aside#sidebar { display: flex; flex-direction: column; flex: 0 0 120px; width: 120px; min-width: 120px; height: auto; max-height: none; min-height: 0; border-right: 1px solid var(--line); border-bottom: none; }
-  body:has(#viewer.workflow-custom) #dropzone { flex: 0 0 auto; padding: 11px 8px; overflow: visible; border-right: none; border-bottom: 1px solid var(--line); }
-  body:has(#viewer.workflow-custom) #image-list { flex: 1; overflow-y: auto; padding: 5px; }
-  body:has(#viewer.workflow-custom) .image-row { gap: 4px; padding: 6px 5px; }
-  body:has(#viewer.workflow-custom) .row-name, body:has(#viewer.workflow-custom) .row-count { font-size: 9px; }
-  #viewer.workflow-custom { flex: 1 0 400px; width: auto; min-width: 400px; min-height: 0; grid-template-columns: 170px minmax(230px,1fr); grid-template-rows: auto auto auto minmax(160px,1fr) auto auto auto auto; overflow: hidden; }
-  #viewer.workflow-custom #viewer-header { padding: 11px 12px 8px; }
-  #viewer.workflow-custom #view-tools { padding: 0 12px 9px; }
-  #viewer.workflow-custom #canvas-wrap { min-height: 160px; margin: 0 8px; }
-  #viewer.workflow-custom #legend { padding: 8px 10px; gap: 5px 8px; }
-  #viewer.workflow-custom #notes-bar { padding: 9px 10px 11px; gap: 6px; }
-  #viewer.workflow-custom #params { padding-left: 10px; padding-right: 10px; }
+  body:has(#viewer.workflow-custom.adjustments-open) main { display: flex; min-height: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+  body:has(#viewer.workflow-custom.adjustments-open) aside#sidebar { display: flex; flex-direction: column; flex: 0 0 120px; width: 120px; min-width: 120px; height: auto; max-height: none; min-height: 0; border-right: 1px solid var(--line); border-bottom: none; }
+  body:has(#viewer.workflow-custom.adjustments-open) #dropzone { flex: 0 0 auto; padding: 11px 8px; overflow: visible; border-right: none; border-bottom: 1px solid var(--line); }
+  body:has(#viewer.workflow-custom.adjustments-open) #image-list { flex: 1; overflow-y: auto; padding: 5px; }
+  body:has(#viewer.workflow-custom.adjustments-open) .image-row { gap: 4px; padding: 6px 5px; }
+  body:has(#viewer.workflow-custom.adjustments-open) .row-name, body:has(#viewer.workflow-custom.adjustments-open) .row-count { font-size: 9px; }
+  #viewer.workflow-custom.adjustments-open { flex: 1 0 400px; width: auto; min-width: 400px; min-height: 0; grid-template-columns: 170px minmax(230px,1fr); grid-template-rows: auto auto auto minmax(160px,1fr) auto auto auto auto; overflow: hidden; }
+  #viewer.workflow-custom.adjustments-open #viewer-header { padding: 11px 12px 8px; }
+  #viewer.workflow-custom.adjustments-open #view-tools { padding: 0 12px 9px; }
+  #viewer.workflow-custom.adjustments-open #canvas-wrap { min-height: 160px; margin: 0 8px; }
+  #viewer.workflow-custom.adjustments-open #legend { padding: 8px 10px; gap: 5px 8px; }
+  #viewer.workflow-custom.adjustments-open #notes-bar { padding: 9px 10px 11px; gap: 6px; }
+  #viewer.workflow-custom.adjustments-open #params { padding-left: 10px; padding-right: 10px; }
   #adjustments-title { padding: 11px 11px 8px; }
   #adjustments-body { padding: 0 11px 13px; }
   #adjustments-body #slider-grid { gap: 13px; }
@@ -434,3 +434,48 @@ body:has(#viewer.review-mode) #export-menu { display: none; }
 
 .source-view-control { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: #777; margin: 8px 0; }
 .source-view-control select { width: 100%; min-width: 0; font-size: 11px; }
+
+/* Batch action remains available without selecting an image. */
+.batch-recognition { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+#btn-recognize-all { width: 100%; }
+#batch-hint { font-size: 10px; line-height: 1.5; margin: 7px 0 0; }
+#batch-report { margin-top: 10px; font-size: 10px; line-height: 1.6; }
+#batch-report-items { margin: 8px 0 0; padding-left: 13px; max-height: 160px; overflow-y: auto; overflow-wrap: anywhere; }
+
+/* Selection is separate from viewing and from recognition status. */
+#photo-list-panel { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+#bulk-image-tools { padding: 5px 12px 8px; border-bottom: 1px solid var(--line); }
+#btn-bulk-select { min-height: 28px; padding: 3px 5px; color: #777; font-size: 11px; }
+.bulk-selection-heading { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+#bulk-selected-count { flex: 1; color: #777; }
+.bulk-selection-heading button { font-size: 10px; padding: 3px 4px; min-height: 27px; }
+#btn-bulk-all { display: inline-flex; align-items: center; gap: 5px; }
+.bulk-all-indicator { width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #aaa; border-radius: 3px; }
+#btn-bulk-all[aria-checked="true"] .bulk-all-indicator,
+#btn-bulk-all[aria-checked="mixed"] .bulk-all-indicator { background: #535353; color: #fff; border-color: #535353; }
+#btn-bulk-all[aria-checked="true"] .bulk-all-indicator::after { content: ""; width: 6px; height: 3px; border-left: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-1px) rotate(-45deg); }
+#btn-bulk-all[aria-checked="mixed"] .bulk-all-indicator::after { content: ""; width: 7px; height: 1.5px; background: currentColor; }
+#btn-bulk-delete { width: 100%; margin-top: 6px; min-height: 29px; font-size: 11px; }
+.row-select-check { width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #bdbdbd; border-radius: 3px; font-size: 10px; }
+.bulk-selected .row-select-check { background: #535353; color: white; border-color: #535353; }
+#image-list.bulk-selecting .image-row.bulk-selected { background: #eeeeee; border-color: #dedede; }
+@media (max-width: 760px) {
+  aside#sidebar:has(.bulk-selecting) { height: 220px; max-height: 220px; }
+  #bulk-image-tools { padding: 3px 6px 6px; }
+  .bulk-selection-heading { flex-wrap: wrap; }
+  #bulk-selected-count { flex-basis: 100%; }
+}
+
+/* The processing route and saved result provenance are separate, visible facts. */
+#recognition-route { font-size: 10px; white-space: nowrap; }
+#saved-source-visible { margin-left: auto; font-size: 10px; }
+.recognition-controls { flex-wrap: wrap; }
+
+/* Mode explanations stay behind a compact, keyboard-accessible disclosure. */
+#recognition-mode-info > summary { display: flex; align-items: center; justify-content: center; width: 26px; min-height: 30px; padding: 0; border: 0; background: transparent; border-radius: 6px; cursor: pointer; }
+#recognition-mode-info > summary::after { content: none; }
+.mode-info-icon { display: inline-flex; justify-content: center; align-items: center; width: 16px; height: 16px; border: 1px solid #999; border-radius: 50%; color: #777; font: 500 12px/1 Georgia, serif; }
+#recognition-mode-info > summary:hover, #recognition-mode-info[open] > summary { background: #f0f0f0; }
+#recognition-mode-info .mode-info-content { left: 0; right: auto; width: 240px; max-width: calc(100vw - 152px); min-width: 0; padding: 14px 16px; font-size: 12px; line-height: 1.6; }
+.mode-info-content strong { color: #444; font-weight: 600; }
+.mode-info-content p { margin: 6px 0 0; color: #777; }

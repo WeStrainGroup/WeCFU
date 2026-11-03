@@ -116,7 +116,8 @@ class ModelPreviewManager:
 
     def create_candidate(self, owner: tuple, state: dict, image_sha256: str,
                          model_params: dict, detections: list, raw_count: int, elapsed_ms: float, *, engine: str = ENGINE,
-                         fusion_provenance: dict | None = None) -> dict:
+                         fusion_provenance: dict | None = None, source_view: str | None = None,
+                         only_unrecognized: bool = False) -> dict:
         identifier = uuid4().hex
         result = {"candidate_id": identifier, "engine": engine,
                   "base_revision": state.get("revision", 0), "image_sha256": image_sha256,
@@ -124,8 +125,11 @@ class ModelPreviewManager:
                   "model_sha256": sam_runtime.MODEL_SHA256 if engine == sam_runtime.ENGINE else MODEL_SHA256, "detections": deepcopy(detections),
                   "raw_count": raw_count, "candidate_count": len(detections), "elapsed_ms": elapsed_ms,
                   "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=self.ttl_seconds)).isoformat()}
+        if only_unrecognized:
+            result["only_unrecognized"] = True
         if engine == sam_runtime.ENGINE:
             result["recipe_id"] = sam_runtime.RECIPE_ID
+            result["source_view"] = source_view
         elif engine in (fusion_runtime.ENGINE, fusion_runtime_v2.ENGINE):
             version = fusion_runtime_v2 if engine == fusion_runtime_v2.ENGINE else fusion_runtime
             if fusion_provenance is None:
@@ -141,6 +145,7 @@ class ModelPreviewManager:
             while len(self._candidates) >= self.max_candidates:
                 self._candidates.popitem(last=False)
             self._candidates[identifier] = {"owner": owner, "state_signature": state_signature(state),
+                                            "only_unrecognized": only_unrecognized,
                                             "deadline": self._clock() + self.ttl_seconds, "result": result}
         return deepcopy(result)
 

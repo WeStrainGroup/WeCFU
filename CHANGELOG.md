@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1
+
+- Ultra is the local algorithm + SAM workflow; Lite keeps the improved classical algorithm.
+- Recognize all processes photos sequentially with existing results and manual work protected.
+- Reuse the SAM worker and distance transform to reduce repeated work without changing model settings.
+- Apply custom settings once, close the panel, then recognize the current photo or the batch.
+- Add batch deletion, consistent rose/blue markers, keyboard navigation fixes and synchronized photo status.
+- Refresh help in English, Chinese, Japanese, Spanish and French, with concise mode explanations.
+
+
 ## 1.2.0
 
 - Add the Fusion v2 automatic workflow using fixed SAM 2.1, colony Grounding DINO

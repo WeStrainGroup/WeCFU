@@ -91,6 +91,14 @@ def _candidate_mask(img_bgr: np.ndarray, plate_mask: np.ndarray,
 
 
 def _component_watershed_split(bw: np.ndarray, params: SegmentParams) -> tuple[np.ndarray, int]:
+    """Preserve the two-value segmentation interface for existing callers."""
+    labels, count, _ = _component_watershed_split_with_distance(bw, params)
+    return labels, count
+
+
+def _component_watershed_split_with_distance(
+    bw: np.ndarray, params: SegmentParams,
+) -> tuple[np.ndarray, int, np.ndarray | None]:
     """Seed each 4-connected island independently, then watershed the whole mask.
 
     Distance values use the full image, so an island's bounding box introduces
@@ -98,11 +106,14 @@ def _component_watershed_split(bw: np.ndarray, params: SegmentParams) -> tuple[n
     explicitly preserves baseline full-image border exclusion; local crop edges
     do not exclude small islands' peaks. Other islands inside an enclosing
     bounding box are masked out before computing its relative threshold.
+
+    Return the existing float64 distance image for callers that also need seed
+    locations. An empty foreground has no distance image and returns None.
     """
     foreground = bw > 0
     components, n_components = ndi.label(foreground)
     if n_components == 0:
-        return np.zeros(bw.shape, dtype=np.int32), 0
+        return np.zeros(bw.shape, dtype=np.int32), 0, None
     distance = ndi.distance_transform_edt(foreground)
     markers = np.zeros(bw.shape, dtype=np.int32)
     height, width = bw.shape
@@ -132,7 +143,7 @@ def _component_watershed_split(bw: np.ndarray, params: SegmentParams) -> tuple[n
     # Preserve the baseline treatment of adjacent seed pixels.
     markers = ndi.label(markers > 0)[0]
     labels = watershed(-distance, markers, mask=foreground)
-    return labels, int(labels.max(initial=0))
+    return labels, int(labels.max(initial=0)), distance
 
 
 def _cropped_region_stats(labels: np.ndarray, label: int, bounds: tuple[slice, slice]) -> dict:

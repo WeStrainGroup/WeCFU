@@ -1,4 +1,4 @@
-"""Opt-in, local SAM2 D0 provider. No labels, experiment runners or cached predictions.
+"""Local SAM2 D0 provider. No labels, experiment runners or cached predictions.
 
 Each request uses fresh temporary source bytes and separate CV / SAM interpreters.
 The app never imports Torch. Its controller enforces one whole-request deadline
@@ -174,6 +174,7 @@ class LocalSamProvider:
         self.enabled = os.environ.get("WECFU_ENABLE_SAM2", "1") != "0"
         self._guard = threading.Lock()
         self._checked_checkpoint = None
+        self.last_timings = None
 
     def require_available(self):
         if sys.platform not in ('darwin', 'linux'):
@@ -218,7 +219,9 @@ class LocalSamProvider:
     def predict(self, payload, plate, image_sha256, *, deadline=None):
         started = time.monotonic()
         deadline = min(started + TIMEOUT_SECONDS, deadline) if deadline is not None else started + TIMEOUT_SECONDS
-        pin = self.require_available()
+        warm = os.environ.get("WECFU_SAM_WARM_WORKER", "1") == "1"
+        timings = {"mode": "warm_worker" if warm else "cold", "status": "running"}
+        pin = None if warm else self.require_available()
         if hashlib.sha256(payload).hexdigest() != image_sha256:
             raise RuntimeUnavailable("Local SAM2 source bytes changed")
         # The only copied input is the current displayed image; no filesystem
@@ -234,17 +237,71 @@ class LocalSamProvider:
                    "PYTORCH_ENABLE_MPS_FALLBACK": "0", "HF_HUB_OFFLINE": "1",
                    "TRANSFORMERS_OFFLINE": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
                    "OPENBLAS_NUM_THREADS": "1", "VECLIB_MAXIMUM_THREADS": "1"}
-            peaks = []
-            for executable, stage in ((CV_PYTHON, "prepare"), (SAM_PYTHON, "infer"), (CV_PYTHON, "finish")):
-                peaks.append(run_stage([str(executable), "-B", str(WORKER), str(folder), stage], folder, deadline, env))
-            result = json.loads((folder / "result.json").read_bytes())
-            if (result.get("engine") != ENGINE or result.get("recipe_id") != RECIPE_ID
-                    or result.get("image_sha256") != image_sha256 or result.get("model_sha256") != MODEL_SHA256
-                    or result.get("plate") != asdict(plate) or result.get("status") != "ok"
-                    or fingerprint(CHECKPOINT) != pin):
-                raise RuntimeUnavailable("Local SAM2 result provenance changed")
-            if not isinstance(result.get("detections"), list) or len(result["detections"]) > 20000:
-                raise RuntimeUnavailable("Local SAM2 produced invalid candidates")
-            if time.monotonic() >= deadline:
-                raise RuntimeUnavailable("Local model preview exceeded 120 seconds")
+            timings["before_seconds"] = time.monotonic() - started
+            result = None
+
+            def validate_result():
+                nonlocal result
+                result = json.loads((folder / "result.json").read_bytes())
+                if (not isinstance(result, dict) or result.get("engine") != ENGINE or result.get("recipe_id") != RECIPE_ID
+                        or result.get("image_sha256") != image_sha256 or result.get("model_sha256") != MODEL_SHA256
+                        or result.get("plate") != asdict(plate) or result.get("status") != "ok"
+                        or fingerprint(CHECKPOINT) != pin):
+                    raise RuntimeUnavailable("Local SAM2 result provenance changed")
+                if (not isinstance(result.get("detections"), list) or len(result["detections"]) > 20000
+                        or type(result.get("raw_count")) is not int
+                        or result["raw_count"] < len(result["detections"])):
+                    raise RuntimeUnavailable("Local SAM2 produced invalid candidates")
+                if time.monotonic() >= deadline:
+                    raise RuntimeUnavailable("Local model preview exceeded 120 seconds")
+
+            if warm:
+                from . import sam_warm_pool
+
+                def verify_pins():
+                    nonlocal pin
+                    pin = self.require_available()
+                    # A resident interpreter must not survive a changed worker,
+                    # interpreter, source manifest, authorization or settings.
+                    files = (SAM_PYTHON, CV_PYTHON, WORKER, AUTHORIZATION,
+                             Path(__file__), Path(sam_warm_pool.__file__),
+                             runtime_paths.PACKAGE_ROOT / "model_assets.json",
+                             Path(runtime_paths.__file__),
+                             REPO / "wecfu/experiments/segmentation.py",
+                             REPO / "wecfu/segment.py", REPO / "wecfu/plate.py")
+                    return (pin, SOURCE_COMMIT, str(SOURCE.resolve()), SAM_DEVICE,
+                            tuple((str(path.resolve()), fingerprint(path)) for path in files),
+                            json.dumps([COMPONENT_PARAMS, MODEL_SETTINGS], sort_keys=True),
+                            hashlib.sha256(json.dumps(env, sort_keys=True).encode()).hexdigest())
+
+                try:
+                    details = sam_warm_pool.POOL.run(folder=folder, deadline=deadline, env=env,
+                        cv_python=CV_PYTHON, sam_python=SAM_PYTHON, worker=WORKER, repo=REPO,
+                        verify_pins=verify_pins, sample_rss=sampled_rss, stop_process=stop_process,
+                        rss_limit=RSS_LIMIT_BYTES, max_output=MAX_JSON_BYTES, validate_result=validate_result)
+                    timings.update(details)
+                except Exception as exc:
+                    timings.update(status="failed", total_seconds=time.monotonic() - started)
+                    self.last_timings = timings
+                    try:
+                        runtime_diagnostics.preserve_failure(exc, phase="local-worker:warm",
+                            folder=folder, details={"elapsed_seconds": time.monotonic()-started,
+                                                  "recipe_unchanged": True})
+                    except Exception:
+                        pass
+                    if isinstance(exc, sam_warm_pool.WarmWorkerError):
+                        raise RuntimeUnavailable(str(exc)) from exc
+                    raise
+            else:
+                peaks = []
+                timings.update(queue_seconds=0.0, worker_reused=False,
+                                         worker_started={"prepare": True, "infer": True, "finish": True})
+                for executable, stage in ((CV_PYTHON, "prepare"), (SAM_PYTHON, "infer"), (CV_PYTHON, "finish")):
+                    stage_started = time.monotonic()
+                    peaks.append(run_stage([str(executable), "-B", str(WORKER), str(folder), stage], folder, deadline, env))
+                    timings[stage + "_seconds"] = time.monotonic() - stage_started
+                timings["sampled_peak_combined_rss_bytes"] = max(peaks, default=0)
+                validate_result()
+            timings.update(status="ok", total_seconds=time.monotonic() - started)
+            self.last_timings = timings
             return result["detections"], result["raw_count"]

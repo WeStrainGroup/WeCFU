@@ -67,7 +67,7 @@ def test_dino_child_keeps_120_seconds_cpu_and_wall_cap(outer,wall,monkeypatch,tm
 
 
 @pytest.mark.parametrize('web,expected',[(False,220.),(True,280.)])
-def test_api_assigns_selected_v2_provider_deadline(web,expected,tmp_path,monkeypatch):
+def test_api_rejects_retired_v2_route_before_inference(web,expected,tmp_path,monkeypatch):
     monkeypatch.setattr(server,'detect_plate',lambda pixels:server.PlateCircle(60,50,40))
     app=server.build_app(lambda:tmp_path/'workspace',web_mode=web)
     observed=[]
@@ -78,6 +78,6 @@ def test_api_assigns_selected_v2_provider_deadline(web,expected,tmp_path,monkeyp
     with TestClient(app) as client:
         raw=upload(client);state=initialized(client)
         monkeypatch.setattr(server,'time',SimpleNamespace(monotonic=lambda:100.,perf_counter=time.perf_counter))
-        response=client.post(BASE+'/model-preview',json=preview_request(state,raw))
-        assert response.status_code==503 and 'synthetic stop' in response.json()['detail']
-    assert observed==[expected]
+        response=client.post(BASE+'/model-preview',json={**preview_request(state,raw),'engine':fusion.ENGINE})
+        assert response.status_code==409 and 'without DINO' in response.json()['detail']
+    assert observed==[]

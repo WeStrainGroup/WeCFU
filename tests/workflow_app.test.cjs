@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../wecfu/server/static/app.js'), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
-const defaults = {plate_inset: .88, min_value: 200, max_saturation: 100,
+const defaults = {plate_inset: .95, min_value: 200, max_saturation: 100,
   min_circularity: .55, min_area_frac: .0001, peak_min_distance: 15};
 const savedParams = {...defaults, min_value: 183, plate_inset: .83};
 const savedDoc = {mode: 'auto', plate: {cx: 100, cy: 100, r: 90}, params: savedParams,
@@ -16,6 +16,8 @@ const savedDoc = {mode: 'auto', plate: {cx: 100, cy: 100, r: 90}, params: savedP
 
 function ui() {
   const nodes = new Map(), windowListeners = new Map(), errors = [];
+  let uuidSequence = 0;
+  const crypto = {randomUUID: () => `00000000-0000-4000-8000-${String(++uuidSequence).padStart(12, '0')}`};
   const document = {activeElement: null};
   function node(id = '', tagName = 'DIV') {
     const classes = new Set(), attributes = new Map(), handlers = new Map();
@@ -25,7 +27,7 @@ function ui() {
       rect: {top: 0, bottom: 20, width: 500, height: 200}, focusCalls: [],
       classList: {toggle(name, force) { const add = force ?? !classes.has(name); if (add) classes.add(name); else classes.delete(name); return add; },
         add(name) { classes.add(name); }, remove(name) { classes.delete(name); }, contains(name) { return classes.has(name); }},
-      setAttribute(key, value) { attributes.set(key, value); }, removeAttribute(key) { attributes.delete(key); },
+      setAttribute(key, value) { attributes.set(key, value); }, getAttribute(key) { return attributes.get(key) ?? null; }, removeAttribute(key) { attributes.delete(key); },
       addEventListener(type, fn) { if (!handlers.has(type)) handlers.set(type, []); handlers.get(type).push(fn); },
       async fire(type, event = {}) { for (const fn of handlers.get(type) || []) await fn({target: this, ...event}); },
       focus(options) { this.focusCalls.push(plain(options)); document.activeElement = this; },
@@ -49,7 +51,7 @@ function ui() {
   document.activeElement = node('body', 'BODY');
   const replacementHint = node(); replacementHint.className = 'model-replacement';
   element('model-tools').appendChild(replacementHint);
-  const window = {location: {search: ''},
+  const window = {location: {search: ''}, crypto,
     addEventListener(type, fn) { if (!windowListeners.has(type)) windowListeners.set(type, []); windowListeners.get(type).push(fn); },
     confirm: () => false,
     WECFU_I18N: {t: key => key, getLang: () => 'en'},
@@ -57,9 +59,11 @@ function ui() {
     WECFU_REFERENCE_CONTROLS: require('../wecfu/server/static/reference_controls.js'),
     WECFU_MODEL_PREVIEW_CONTROLS: require('../wecfu/server/static/model_preview_controls.js'),
     WECFU_REVIEW_QUEUE_CONTROLS: require('../wecfu/server/static/review_queue_controls.js'),
-    WECFU_WORKFLOW_CONTROLS: require('../wecfu/server/static/workflow_controls.js')};
+    WECFU_WORKFLOW_CONTROLS: require('../wecfu/server/static/workflow_controls.js'),
+    WECFU_DEFAULT_BATCH: require('../wecfu/server/static/default_batch.js'),
+    WECFU_SERIAL_BATCH: require('../wecfu/server/static/serial_batch.js')};
   const context = vm.createContext({window, document, console: {error: e => errors.push(e)},
-    URLSearchParams, AbortController, clearTimeout, setTimeout, requestAnimationFrame: () => 1,
+    URLSearchParams, AbortController, crypto, clearTimeout, setTimeout, requestAnimationFrame: () => 1,
     ResizeObserver: class { observe() {} }, queueMicrotask() {},
     fetch() { throw new Error('real network is forbidden'); }});
   vm.runInContext(source, context);
@@ -68,7 +72,7 @@ function ui() {
   run(`
     let calls = [], saves = [], previews = 0, moves = [], confirmations = [];
     draw = () => {}; invalidateBackground = () => {}; refreshMaskPreview = () => { previews++; };
-    loadImages = async () => {}; queueSave = () => { saves.push(snapshot()); }; flushEdits = async () => {};
+    loadImages = async () => {}; loadPlateImage = async () => ({sourceHash:'a'.repeat(64)}); queueSave = () => { saves.push(snapshot()); }; flushEdits = async () => {};
     jsonRequest = async (url, method = 'GET', body) => { calls.push({url, method, body: body === undefined ? null : clone(body)}); throw new Error('unexpected request ' + url); };
     state.config = {web_mode: false, builtin_algorithms: ['baseline', ENHANCED_ENGINE], default_count_engine: ENHANCED_ENGINE,
       default_params: {...DEFAULTS}, experimental_models: {cfucounter: {enabled: false, available: false}},
@@ -92,6 +96,182 @@ function custom(view) {
   view.run('changeRecognitionProfile()');
 }
 
+function samDefault(view) {
+  view.run('state.config.default_model = SAM_ENGINE; syncWorkflowRoute(); updateControls();');
+}
+
+for (const button of ['btn-recognize-all', 'btn-run']) {
+  test(`wired ${button} uses serial SAM for local default and captures one capability`, async () => {
+    const v = ui(); samDefault(v);
+    v.run(`emptyViewer(); let recognizedItems = [], activeItems = 0, maxActiveItems = 0;
+      state.imageList = [{name:'first.png'}, {name:'second.png'}];
+      window.WECFU_DEFAULT_BATCH = {
+        recognizeBuiltin: async () => { throw Error('must not fall back to classical'); },
+        recognize: async item => {
+          activeItems++; maxActiveItems = Math.max(maxActiveItems, activeItems);
+          recognizedItems.push(clone(item));
+          state.config.models.sam2.model_sha256 = 'd'.repeat(64);
+          await Promise.resolve(); activeItems--;
+          return {name:item.name, status:'completed'};
+        }}; updateControls();`);
+    await v.element(button).fire('click');
+    const items = plain(v.run('recognizedItems'));
+    assert.deepEqual(items.map(item => item.name), ['first.png', 'second.png']);
+    assert.ok(items.every(item => item.engine === 'sam2_local_v1'));
+    assert.ok(items.every(item => item.capability.model_sha256 === 'c'.repeat(64)));
+    assert.equal(v.run('maxActiveItems'), 1);
+    assert.equal(v.run('state.workflow.lastBatchReport.results.length'), 2);
+    assert.equal(v.run('state.busy'), false);
+    assert.equal(v.run('saves.length'), 0);
+    assert.equal(v.run('calls.length'), 0);
+    assert.deepEqual(v.errors, []);
+  });
+}
+
+test('wired fresh-current default SAM validates and adopts only this image with guarded receipt and Undo', async () => {
+  const v = ui();
+  const fresh = {...plain(savedDoc), revision:42, counted:false, detections:[], machine_count_initial:0,
+    count_engine:null, count_model:null, count_params:null};
+  v.context.freshBefore = fresh;
+  v.run(`adopt(freshBefore); trackRevision(freshBefore);
+    state.sourceView = 'unknown'; state.imageList = [{name:'first.png'}, {name:'second.png'}];
+    const samMarks = [{id:1,cx:80,cy:90,r:5,source:'cv',score:.98,accepted:true}];
+    jsonRequest = async (url, method='GET', body) => {
+      calls.push({url,method,body:body === undefined ? null : clone(body)});
+      if (url.endsWith('/detections')) return clone(freshBefore);
+      if (url.endsWith('/reference')) return {status:'missing'};
+      if (url.endsWith('/model-preview')) return {candidate_id:'synthetic-sam-candidate',
+        base_revision:42,image_sha256:'a'.repeat(64),engine:SAM_ENGINE,model_sha256:'c'.repeat(64),
+        recipe_id:modelHelpers.SAM_RECIPE,plate:clone(freshBefore.plate),model_params:{plate_inset:.95},
+        candidate_count:1,detections:clone(samMarks),expires_at:Date.now()/1000+60};
+      if (url.endsWith('/model-preview/apply')) return {...clone(freshBefore),revision:43,counted:true,
+        detections:clone(samMarks),machine_count_initial:1,count_engine:SAM_ENGINE,
+        count_model:{model_sha256:'c'.repeat(64),recipe_id:modelHelpers.SAM_RECIPE,plate_inset:.95},
+        _model_preview_apply:{request_id:body.request_id,request:clone(body),applied_revision:43}};
+      throw Error('unexpected route '+url);
+    };`);
+  samDefault(v);
+  await v.element('btn-recognize-current').fire('click');
+  const calls = plain(v.run('calls')), posts = calls.filter(call => call.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.ok(calls.every(call => call.url.includes('/first.png/')));
+  assert.equal(calls.some(call => call.url.endsWith('/source_view') || call.url.includes('/run?')), false);
+  assert.deepEqual(posts[0].body, {engine:'sam2_local_v1',expected_revision:42,
+    expected_image_sha256:'a'.repeat(64),model_params:{},only_unrecognized:true});
+  assert.equal(posts[1].body.only_unrecognized, true);
+  assert.equal(posts[1].body.replace_all, true);
+  assert.equal(posts[1].body.expected_revision, 42);
+  assert.equal(v.run('state.doc.count_engine'), 'sam2_local_v1');
+  assert.equal(v.run('state.doc.reviewed'), false);
+  assert.deepEqual(plain(v.run('state.history[0]')), fresh);
+  assert.equal(v.run('state.workflow.lastBatchReport.total'), 1);
+  assert.equal(v.run('saves.length'), 0);
+  v.run('undo()');
+  assert.equal(v.run('state.doc.counted'), false);
+  assert.deepEqual(plain(v.run('state.detections')), []);
+  assert.equal(v.run('state.saveQueues.get(keyFor()).revision'), 43);
+  assert.deepEqual(v.errors, []);
+});
+
+test('wired existing-current default SAM keeps a validated preview separate from saved provenance', async () => {
+  const v = ui(), before = plain(v.run('snapshot()')); samDefault(v);
+  v.run(`let requestedPreview = [];
+    countDefaultBatch = async () => { throw Error('existing result must not auto-adopt'); };
+    recount = async () => { throw Error('must not invoke classical'); };
+    loadPlateImage = async () => ({sourceHash:'a'.repeat(64),image:{width:200,height:200}});
+    boundedImage = image => image;
+    request = async (url, options) => {
+      requestedPreview.push({url,body:JSON.parse(options.body)});
+      return {json:async()=>({candidate_id:'explicit-sam-preview',base_revision:9,
+        image_sha256:'a'.repeat(64),engine:SAM_ENGINE,model_sha256:'c'.repeat(64),
+        recipe_id:modelHelpers.SAM_RECIPE,plate:clone(fixtureDoc.plate),model_params:{plate_inset:.95},
+        candidate_count:0,detections:[],expires_at:Date.now()/1000+60})};
+    };`);
+  await v.element('btn-recognize-current').fire('click');
+  try {
+    assert.deepEqual(plain(v.run('requestedPreview')), [{url:'/api/batch/synthetic/image/first.png/model-preview',
+      body:{engine:'sam2_local_v1',expected_revision:9,expected_image_sha256:'a'.repeat(64),model_params:{}}}]);
+    assert.equal(v.run('state.modelPreview.candidate.candidate_id'), 'explicit-sam-preview');
+    assert.equal(v.element('btn-model-apply').hidden, false);
+    assert.equal(v.element('btn-model-apply').disabled, false);
+    assert.deepEqual(plain(v.run('snapshot()')), before);
+    assert.equal(v.run('state.doc.count_engine'), 'baseline');
+    assert.equal(v.element('recognition-route').textContent, 'defaultRoute');
+    assert.equal(v.element('saved-source-visible').hidden, false);
+    assert.equal(v.run('saves.length'), 0);
+    assert.equal(v.run('calls.length'), 0);
+    assert.deepEqual(v.errors, []);
+  } finally { v.run('clearModelPreview()'); }
+});
+
+for (const unavailable of ["available = false", "enabled = false", "recipe_id = 'wrong'", "model_sha256 = 'invalid'"]) {
+  test(`unavailable default SAM (${unavailable}) disables both actions and never falls back`, async () => {
+    const v = ui();
+    v.run(`state.config.models.sam2.${unavailable};`); samDefault(v);
+    assert.equal(v.element('btn-recognize-current').disabled, true);
+    assert.equal(v.element('btn-recognize-all').disabled, true);
+    assert.equal(v.element('method-select').value, 'sam2_local_v1');
+    // Fire handlers directly as well: disabled DOM is not the only safety gate.
+    await v.element('btn-recognize-current').fire('click');
+    await v.element('btn-recognize-all').fire('click');
+    await v.element('btn-run').fire('click');
+    assert.equal(v.run('calls.length'), 0);
+    assert.equal(v.run('saves.length'), 0);
+    assert.equal(v.element('status').textContent, 'modelUnavailable');
+    assert.equal(v.element('status').classList.contains('error'), true);
+    assert.equal(v.element('method-select').value, 'sam2_local_v1');
+    assert.deepEqual(v.errors, []);
+  });
+}
+
+test('explicit classical profile keeps improved builtin current and batch routes with fixed defaults', async () => {
+  const v = ui(); samDefault(v);
+  v.element('recognition-profile').value = 'classical';
+  await v.element('recognition-profile').fire('change');
+  v.run(`state.config.models.sam2.available = false; updateControls();
+    jsonRequest = async (url, method='GET', body) => {
+      calls.push({url,method,body:body === undefined ? null : clone(body)});
+      if (url.endsWith('/reference')) return {status:'missing'};
+      if (url.includes('/run?')) return {...snapshot(),revision:10,counted:true,
+        count_engine:ENHANCED_ENGINE,count_model:null,count_params:clone(body),params:clone(body)};
+      throw Error('unexpected route '+url);
+    };`);
+  assert.equal(v.element('method-select').value, 'component_watershed_v1');
+  assert.equal(v.element('recognition-route').textContent, 'classicalRoute');
+  assert.equal(v.element('btn-recognize-current').disabled, false);
+  assert.equal(v.element('btn-recognize-all').disabled, false);
+  await v.element('btn-recognize-current').fire('click');
+  const posts = plain(v.run("calls.filter(call => call.method === 'POST')"));
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /engine=component_watershed_v1/);
+  assert.deepEqual(posts[0].body, defaults);
+  v.run(`let classicalItems=[]; emptyViewer();
+    window.WECFU_DEFAULT_BATCH = {
+      recognize:async()=>{throw Error('explicit classical must not invoke SAM');},
+      recognizeBuiltin:async item=>{classicalItems.push(clone(item));return {name:item.name,status:'completed'};}
+    };`);
+  await v.element('btn-recognize-all').fire('click');
+  assert.equal(v.run('classicalItems.length'), 1);
+  assert.equal(v.run('classicalItems[0].engine'), 'component_watershed_v1');
+  assert.deepEqual(plain(v.run('classicalItems[0].params')), defaults);
+  assert.deepEqual(v.errors, []);
+});
+
+test('web mode stays on builtin even with a local SAM default in a stale configuration', () => {
+  const v = ui(); samDefault(v);
+  assert.equal(v.element('profile-option-default').textContent, 'profileDefault');
+  assert.equal(v.element('profile-option-classical').hidden, false);
+  v.run('state.config.web_mode=true; state.config.models.sam2.available=false; syncWorkflowRoute(); updateControls();');
+  assert.equal(v.element('profile-option-default').textContent, 'profileClassical');
+  assert.equal(v.element('profile-option-classical').hidden, true);
+  assert.equal(v.element('mode-info-title').textContent, 'profileClassical');
+  assert.equal(v.element('method-select').value, 'baseline');
+  assert.equal(v.element('recognition-route').textContent, 'classicalRoute');
+  assert.equal(v.element('btn-recognize-current').disabled, false);
+  assert.equal(v.element('btn-recognize-all').disabled, false);
+  assert.equal(v.run('calls.length'), 0);
+});
+
 test('custom parameter edits remain a draft and never save into the loaded document', () => {
   const v = ui(), before = plain(v.run('snapshot()'));
   custom(v);
@@ -102,6 +282,235 @@ test('custom parameter edits remain a draft and never save into the loaded docum
   assert.equal(v.run('saves.length'), 0);
   assert.equal(v.run('calls.length'), 0);
   assert.equal(v.run('state.history.length'), 0);
+});
+
+test('applying custom settings freezes the recipe and closes the panel without recognizing or editing a photo', async () => {
+  const v = ui(), before = plain(v.run('snapshot()')); custom(v);
+  assert.equal(v.run('state.workflow.adjustmentsOpen'), true);
+  assert.equal(v.element('btn-recognize-current').hidden, false);
+  assert.equal(v.element('btn-recognize-all').hidden, false);
+  v.element('p-min-value').value = 172;
+  v.run("parametersChanged('min_value')");
+  assert.equal(v.run('state.workflow.customParams.min_value'), 172);
+  assert.equal(v.run('state.workflow.appliedCustomParams.min_value'), 200);
+  v.document.activeElement = v.element('p-min-value');
+  await v.element('btn-apply-params').fire('click');
+  const recipe = {...defaults, min_value:172};
+  assert.deepEqual(plain(v.run('state.workflow.appliedCustomParams')), recipe);
+  assert.equal(v.run('state.workflow.adjustmentsOpen'), false);
+  assert.equal(v.element('adjustments-panel').hidden, true);
+  assert.equal(v.element('btn-adjustments-toggle').attributes.get('aria-expanded'), 'false');
+  assert.equal(v.document.activeElement, v.element('canvas'));
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+  assert.equal(v.run('state.history.length'), 0);
+  await v.element('btn-adjustments-toggle').fire('click');
+  assert.equal(v.run('state.workflow.adjustmentsOpen'), true);
+  assert.equal(v.element('adjustments-panel').hidden, false);
+  assert.equal(v.element('btn-adjustments-toggle').attributes.get('aria-expanded'), 'true');
+  v.element('p-min-value').value = 77; v.run("parametersChanged('min_value')");
+  await v.element('btn-adjustments-toggle').fire('click');
+  assert.equal(v.run('state.workflow.kind'), 'custom');
+  assert.equal(v.run('state.workflow.adjustmentsOpen'), false);
+  assert.deepEqual(plain(v.run('state.workflow.appliedCustomParams')), recipe);
+  assert.equal(v.run('state.workflow.customParams.min_value'), 77);
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  assert.deepEqual(v.errors, []);
+});
+
+test('custom recipe and draft survive navigation and profile changes, while reset changes only the draft', async () => {
+  const v = ui(); custom(v);
+  v.element('p-min-value').value = 177; v.run("parametersChanged('min_value'); applyCustomSettings()");
+  v.run('toggleAdjustmentPanel()');
+  v.element('p-min-value').value = 166; v.run("parametersChanged('min_value')");
+  v.context.otherCustomDoc = {...plain(savedDoc), params:{...savedParams,min_value:222}};
+  v.run("state.imageName='second.png'; adopt(otherCustomDoc)");
+  assert.equal(v.run('state.workflow.customParams.min_value'), 166);
+  assert.equal(v.run('state.workflow.appliedCustomParams.min_value'), 177);
+  assert.equal(v.run('paramsBody().min_value'), 166);
+  v.element('recognition-profile').value = 'default';
+  await v.element('recognition-profile').fire('change');
+  custom(v);
+  assert.equal(v.run('state.workflow.adjustmentsOpen'), true);
+  assert.equal(v.run('paramsBody().min_value'), 166);
+  assert.equal(v.run('state.workflow.appliedCustomParams.min_value'), 177);
+  await v.element('btn-defaults').fire('click');
+  assert.deepEqual(plain(v.run('state.workflow.customParams')), defaults);
+  assert.equal(v.run('state.workflow.appliedCustomParams.min_value'), 177);
+  assert.equal(Number(v.element('p-inset').value), .95);
+  assert.equal(v.element('v-inset').value, '0.90');
+  assert.equal(v.run('state.doc.params.min_value'), 222);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+  assert.deepEqual(v.errors, []);
+});
+
+test('invalid custom draft cannot replace an applied recipe or trigger recognition', async () => {
+  const v = ui(); custom(v);
+  v.element('p-min-value').value = 177; v.run("parametersChanged('min_value'); applyCustomSettings(); toggleAdjustmentPanel()");
+  const applied = plain(v.run('state.workflow.appliedCustomParams'));
+  v.element('p-min-value').value = '';
+  await v.element('btn-apply-params').fire('click');
+  assert.deepEqual(plain(v.run('state.workflow.appliedCustomParams')), applied);
+  assert.equal(v.run('state.workflow.adjustmentsOpen'), true);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+});
+
+for (const inputOrder of ['pending','blur-first']) test(`Apply rejects an invalid normalized number (${inputOrder}) without applying another draft`, async () => {
+  const v=ui();custom(v);
+  const input=v.element('v-min-value');
+  input.value='.9';await input.fire('input');
+  await v.element('btn-apply-params').fire('click');
+  assert.equal(v.run('state.workflow.appliedCustomParams.min_value'),230);
+  v.run('toggleAdjustmentPanel()');
+  v.element('p-min-value').value=166;v.run("parametersChanged('min_value')");
+  input.value='1.5';await input.fire('input');
+  if(inputOrder==='blur-first')await input.fire('blur');
+  await v.element('btn-apply-params').fire('click');
+  assert.equal(v.run('state.workflow.appliedCustomParams.min_value'),230);
+  assert.equal(v.run('state.workflow.adjustmentsOpen'),true);
+  assert.equal(input.attributes.get('aria-invalid'),'true');
+  assert.equal(v.run('calls.length'),0);
+  assert.equal(v.run('saves.length'),0);
+  if(inputOrder==='pending'){
+    input.value='.8';await input.fire('input');await input.fire('blur');
+    await v.element('btn-apply-params').fire('click');
+    assert.equal(v.run('state.workflow.appliedCustomParams.min_value'),204);
+  }else{
+    await v.element('btn-defaults').fire('click');
+    await v.element('btn-apply-params').fire('click');
+    assert.deepEqual(plain(v.run('state.workflow.appliedCustomParams')),defaults);
+  }
+  assert.equal(v.run('state.workflow.adjustmentsOpen'),false);
+  assert.notEqual(input.attributes.get('aria-invalid'),'true');
+  assert.deepEqual(v.errors,[]);
+});
+
+test('dragging a slider repairs only its own invalid numeric value and leaves other errors blocking Apply',async()=>{
+  const v=ui();custom(v);
+  const original=plain(v.run('state.workflow.appliedCustomParams'));
+  const brightness=v.element('v-min-value'),color=v.element('v-max-sat');
+  for(const input of [brightness,color]){
+    input.value='1.5';await input.fire('input');await input.fire('blur');
+    assert.equal(input.attributes.get('aria-invalid'),'true');
+  }
+  const brightnessSlider=v.element('s-min-value');
+  brightnessSlider.value=.5;await brightnessSlider.fire('input');
+  assert.equal(v.run('state.workflow.customParams.min_value'),128);
+  assert.notEqual(brightness.attributes.get('aria-invalid'),'true');
+  assert.equal(color.attributes.get('aria-invalid'),'true');
+  await v.element('btn-apply-params').fire('click');
+  assert.deepEqual(plain(v.run('state.workflow.appliedCustomParams')),original);
+  assert.equal(v.run('state.workflow.adjustmentsOpen'),true);
+  const colorSlider=v.element('s-max-sat');
+  colorSlider.value=.25;await colorSlider.fire('input');
+  assert.notEqual(color.attributes.get('aria-invalid'),'true');
+  await v.element('btn-apply-params').fire('click');
+  assert.deepEqual(plain(v.run('state.workflow.appliedCustomParams')),{...defaults,min_value:128,max_saturation:64});
+  assert.equal(v.run('state.workflow.adjustmentsOpen'),false);
+  assert.equal(v.run('calls.length'),0);
+  assert.equal(v.run('saves.length'),0);
+  assert.deepEqual(v.errors,[]);
+});
+
+test('custom current recognition uses the applied recipe even with an uncommitted draft and a viewed photo', async () => {
+  const v = ui(); custom(v);
+  v.element('p-min-value').value = 177; v.run("parametersChanged('min_value'); applyCustomSettings(); toggleAdjustmentPanel()");
+  v.element('p-min-value').value = 88; v.run("parametersChanged('min_value')");
+  v.run(`state.imageList[0].viewed=true;
+    jsonRequest=async(url,method='GET',body)=>{
+      calls.push({url,method,body:body===undefined?null:clone(body)});
+      if(url.endsWith('/reference')) return {status:'missing'};
+      if(url.includes('/run?')) return {...snapshot(),revision:10,counted:true,
+        count_engine:ENHANCED_ENGINE,count_model:null,count_params:clone(body),params:clone(body)};
+      throw Error('unexpected route '+url);
+    };`);
+  await v.element('btn-recognize-current').fire('click');
+  const posts=plain(v.run("calls.filter(call=>call.method==='POST')"));
+  assert.equal(posts.length,1);
+  assert.deepEqual(posts[0].body,{...defaults,min_value:177});
+  assert.notEqual(new URL(posts[0].url,'http://synthetic').searchParams.get('only_unreviewed'),'true');
+  assert.equal(v.run('state.workflow.customParams.min_value'),88);
+  assert.equal(v.run('state.workflow.appliedCustomParams.min_value'),177);
+  assert.equal(v.run('state.doc.count_params.min_value'),177);
+  assert.equal(v.run('state.history.length'),1);
+  assert.equal(v.run('confirmations.length'),0);
+  assert.deepEqual(v.errors,[]);
+});
+
+test('custom all batch captures applied parameters and protects existing human work',async()=>{
+  const v=ui();custom(v);
+  v.element('p-min-value').value=181;v.run("parametersChanged('min_value');applyCustomSettings();toggleAdjustmentPanel()");
+  v.element('p-min-value').value=91;v.run("parametersChanged('min_value')");
+  v.run(`const scopeDocs={
+    'first.png':{...fixtureDoc,revision:10},'seen.png':{...fixtureDoc,revision:11},
+    'edited.png':{...fixtureDoc,revision:12,reviewed:true},'manual.png':{...fixtureDoc,revision:13,mode:'manual'},
+    'notes.png':{...fixtureDoc,revision:14,notes:'preserve'},'reference.png':{...fixtureDoc,revision:15},
+    'race.png':{...fixtureDoc,revision:16},'last.png':{...fixtureDoc,revision:17}};
+    state.imageList=Object.entries(scopeDocs).map(([name,doc])=>({name,counted:true,viewed:name==='seen.png',
+      reviewed:Boolean(doc.reviewed),mode:doc.mode,notes:doc.notes}));
+    jsonRequest=async(url,method='GET',body)=>{
+      calls.push({url,method,body:body===undefined?null:clone(body)});
+      const name=decodeURIComponent(url.split('/image/')[1].split('/')[0]);
+      if(url.endsWith('/detections')) return clone(scopeDocs[name]);
+      if(url.endsWith('/reference')) return {status:name==='reference.png'?'verified':'missing'};
+      if(url.includes('/run?')) {
+        if(name==='race.png'){const error=Error('concurrent review');error.status=409;throw error;}
+        if(name==='first.png'){
+          state.workflow.customParams={...DEFAULTS,min_value:71};
+          state.workflow.appliedCustomParams={...DEFAULTS,min_value:72};
+          state.config.default_count_engine='baseline';state.config.builtin_algorithms=['baseline'];
+        }
+        return {...clone(scopeDocs[name]),revision:scopeDocs[name].revision+1,
+          params:clone(body),count_params:clone(body),count_engine:ENHANCED_ENGINE,count_model:null};
+      }
+      throw Error('unexpected route '+url);
+    };`);
+  await v.element('btn-recognize-all').fire('click');
+  const calls=plain(v.run('calls')),posts=calls.filter(call=>call.method==='POST');
+  const names=posts.map(call=>decodeURIComponent(call.url.split('/image/')[1].split('/')[0]));
+  assert.deepEqual(names,['first.png','seen.png','race.png','last.png']);
+  for(const post of posts){
+    assert.deepEqual(post.body,{...defaults,min_value:181});
+    const query=new URL(post.url,'http://synthetic').searchParams;
+    assert.equal(query.get('engine'),'component_watershed_v1');
+    assert.equal(query.get('protect_existing_edits'),'true');
+    assert.notEqual(query.get('only_unreviewed'),'true');
+  }
+  assert.equal(posts.filter(call=>call.url.includes('race.png')).length,1);
+  assert.equal(posts.some(call=>/edited|manual|notes|reference/.test(call.url)),false);
+  assert.equal(calls.some(call=>call.url.endsWith('/reference.png/reference')),true);
+  assert.equal(v.run('state.busy'),false);
+  assert.equal(v.run('saves.length'),0);
+  assert.deepEqual(v.errors,[]);
+});
+
+for (const status of [undefined,503]) test(`custom batch stops after an uncertain write (${status || 'disconnect'}) and clears the stale current photo`,async()=>{
+  const v=ui();custom(v);v.run('applyCustomSettings()');
+  v.context.uncertainStatus=status;
+  v.run(`state.imageList=[{name:'first.png'},{name:'next.png'}];
+    jsonRequest=async(url,method='GET',body)=>{
+      calls.push({url,method,body:body===undefined?null:clone(body)});
+      if(url.endsWith('/detections'))return clone(fixtureDoc);
+      if(url.endsWith('/reference'))return {status:'missing'};
+      if(method==='POST'){const error=Error('synthetic write outcome unknown');
+        if(uncertainStatus!==undefined)error.status=uncertainStatus;throw error;}
+      throw Error('unexpected route '+url);
+    };`);
+  await v.element('btn-recognize-all').fire('click');
+  const calls=plain(v.run('calls'));
+  assert.equal(calls.filter(call=>call.method==='POST').length,1);
+  assert.equal(calls.some(call=>call.url.includes('next.png')),false);
+  assert.equal(v.run('state.workflow.lastBatchReport.canceled'),true);
+  assert.equal(v.run('state.workflow.lastBatchReport.failed[0].uncertain'),true);
+  assert.equal(v.run('state.doc'),null);
+  assert.equal(v.run('state.imageName'),null);
+  assert.equal(v.run('state.history.length'),0);
+  assert.equal(v.run('saves.length'),0);
+  assert.equal(v.run('state.busy'),false);
+  assert.deepEqual(v.errors,[]);
 });
 
 test('adopting another image retains the custom draft and each image original mark provenance', () => {
@@ -124,27 +533,31 @@ test('adopting another image retains the custom draft and each image original ma
   assert.equal(v.run('saves.length'), 0);
 });
 
-test('default recognition dispatches only the selected available model and never falls back after failure', async () => {
+test('legacy config without a default model uses improved builtin fixed defaults', async () => {
   const v = ui();
-  v.run(`let routes = []; runModelPreview = async () => { routes.push(selectedModelEngine()); throw new Error('synthetic model failure'); };
-    recount = async () => { routes.push('builtin'); };`);
-  assert.equal(v.element('method-select').value, 'sam_dino_fusion_local_v2');
-  await assert.rejects(v.run('recognizeCurrent()'), /synthetic model failure/);
-  assert.deepEqual(plain(v.run('routes')), ['sam_dino_fusion_local_v2']);
-  v.run('state.config.models.fusion_v2.available = false; syncWorkflowRoute();');
-  await assert.rejects(v.run('recognizeCurrent()'), /synthetic model failure/);
-  assert.deepEqual(plain(v.run('routes')), ['sam_dino_fusion_local_v2', 'sam_dino_fusion_local_v2']);
-  v.run('state.config.models.sam2.available = false; syncWorkflowRoute();');
-  await assert.rejects(v.run('recognizeCurrent()'), /synthetic model failure/);
-  assert.deepEqual(plain(v.run('routes')), ['sam_dino_fusion_local_v2', 'sam_dino_fusion_local_v2', 'sam_dino_fusion_local_v2']);
-  assert.equal(v.run('state.history.length'), 0);
+  v.run(`let routes = []; runModelPreview = async () => { throw Error('must not run a model'); };
+    state.config.models.sam2.available = false; state.config.models.fusion_v2.available = false;
+    state.workflow.customParams = {...DEFAULTS, min_value:77}; fillParams(state.workflow.customParams);
+    jsonRequest = async (url, method='GET', body) => {
+      if (url.endsWith('/reference')) return {status:'missing'};
+      routes.push({url, body:clone(body)});
+      return {...snapshot(), revision:10, counted:true, count_engine:ENHANCED_ENGINE, count_params:clone(body), params:clone(body)};
+    };`);
+  assert.equal(v.element('method-select').value, 'component_watershed_v1');
+  await v.run('recognizeCurrent()');
+  const routes = plain(v.run('routes'));
+  assert.equal(routes.length, 1);
+  assert.match(routes[0].url, /engine=component_watershed_v1/);
+  assert.deepEqual(routes[0].body, defaults);
+  assert.equal(v.run('state.workflow.customParams.min_value'), 77);
+  assert.equal(v.run('state.history.length'), 1);
   assert.equal(v.run('saves.length'), 0);
 });
 
 test('custom batch recounts machine-only results with one captured recipe, skips human work and never retries 409', async () => {
   const v = ui(); custom(v);
   v.element('p-min-value').value = 190;
-  v.run("parametersChanged('min_value')");
+  v.run("parametersChanged('min_value'); applyCustomSettings()");
   v.run(`
     const docs = {'first.png': {...fixtureDoc, revision: 10}, 'second.png': {...fixtureDoc, revision: 11},
       'manual.png': {...fixtureDoc, mode: 'manual'}, 'notes.png': {...fixtureDoc, notes: 'preserve'},
@@ -348,20 +761,19 @@ test('default model panel appears only for actionable trial states and replaceme
     {name: 'error', setup: "state.modelPreview.error = 'synthetic error'", hint: false, message: 'synthetic error'},
     {name: 'message', setup: "state.modelPreview.message = 'modelTrialExpired'", hint: false, message: 'modelTrialExpired'},
     {name: 'pending apply', setup: 'state.modelPreview.candidate = {candidate_count: 3}; state.modelPreview.pendingApply = {uncertain: true}', hint: true, message: 'modelApplying'},
-    {name: 'manual plate', setup: 'state.doc.plate_manual = true', hint: false, message: 'fusionAutomaticPlateRequired'},
-    {name: 'unavailable', setup: 'state.config.models.fusion_v2.available = false', hint: false, message: 'modelUnavailable'},
+    {name: 'unavailable', setup: 'state.config.models.sam2.available = false', hint: false, message: 'modelUnavailable'},
   ];
   for (const item of states) {
-    v.run(`Object.assign(state.modelPreview, {loading: false, candidate: null, error: '', message: '', pendingApply: null});
-      state.doc.plate_manual = false; state.config.models.fusion_v2.available = true;
+    v.run(`Object.assign(state.modelPreview, {loading: false, candidate: null, error: '', message: '', pendingApply: null, engine: SAM_ENGINE}); syncWorkflowRoute();
+      state.doc.plate_manual = false; state.config.models.sam2.available = true;
       ${item.setup}; updateModelControls();`);
     assert.equal(panel.hidden, false, item.name);
     assert.equal(hint.hidden, !item.hint, item.name);
     assert.equal(v.element('btn-model-apply').hidden, item.name !== 'candidate', item.name);
-    assert.equal(v.element('btn-model-discard').hidden, !['candidate', 'loading'].includes(item.name), item.name);
+    assert.equal(v.element('btn-model-discard').hidden, item.name === 'pending apply', item.name);
     if (item.message) assert.equal(v.element('model-message').textContent, item.message, item.name);
   }
-  v.run('state.config.models.fusion_v2.available = true; updateModelControls()');
+  v.run('state.config.models.sam2.available = true; clearModelPreview(); updateModelControls()');
   assert.equal(panel.hidden, true);
   assert.equal(hint.hidden, true);
   assert.equal(v.run('calls.length'), 0);
@@ -545,18 +957,439 @@ test('public view declaration is SHA bound and never changes saved colony marks'
   await v.run('changeSourceView()');
   assert.equal(v.run('state.sourceView'), 'back');
   assert.equal(v.element('btn-model-preview').disabled, true);
-  assert.equal(v.element('model-message').textContent, 'sourceViewRequired');
+  assert.equal(v.element('btn-recognize-current').disabled, false);
+  assert.equal(v.element('btn-refine-current').disabled, false);
   assert.deepEqual(plain(v.run('calls[0].body')), {source_sha256: 'a'.repeat(64), view: 'back'});
   assert.deepEqual(plain(v.run('snapshot()')), before);
   assert.equal(v.run('saves.length'), 0);
 });
 
-test('public web default remains Fusion and unavailable model never presents a classic substitute', () => {
+test('public web uses its configured builtin without requiring SAM or enabling a new backend', () => {
   const v = ui();
-  v.run(`state.config.web_mode = true; state.config.models.fusion_v2.available = false;
+  v.run(`state.config.web_mode = true; state.config.models.sam2.available = false;
     syncWorkflowRoute(); updateControls();`);
-  assert.equal(v.element('method-select').value, 'sam_dino_fusion_local_v2');
+  assert.equal(v.element('method-select').value, 'baseline');
+  assert.equal(v.element('btn-recognize-current').disabled, false);
+  assert.equal(v.element('btn-refine-current').disabled, true);
+  assert.equal(v.element('model-tools').hidden, true);
+});
+
+test('legacy builtin recognize-all needs no selection and guards loading and preview', async () => {
+  const v = ui();
+  v.run('emptyViewer(); updateControls();');
+  assert.equal(v.run('state.imageName'), null);
+  assert.equal(v.element('btn-recognize-all').hidden, false);
+  assert.equal(v.element('btn-recognize-all').disabled, false);
   assert.equal(v.element('btn-recognize-current').disabled, true);
-  assert.equal(v.element('model-tools').hidden, false);
-  assert.ok(v.element('model-message').textContent.includes('modelUnavailable'));
+  for (const setup of [
+    'state.loading = true', 'state.busy = true', 'state.modelPreview.loading = true',
+    'state.modelPreview.pendingApply = {uncertain: true}',
+    "$('mode-select').value = 'manual'",
+    'state.modelPreview.candidate = {candidate_count: 1}',
+    "state.modelPreview.engine = FUSION_V2_ENGINE; state.modelPreview.error = 'failed'",
+  ]) {
+    const blocked = ui();
+    blocked.run(`emptyViewer(); let recognizeCalls = 0;
+      window.WECFU_DEFAULT_BATCH = {recognizeBuiltin: async () => { recognizeCalls++; }};
+      ${setup}; updateControls();`);
+    assert.equal(blocked.element('btn-recognize-all').hidden, false, setup);
+    assert.equal(blocked.element('btn-recognize-all').disabled, true, setup);
+    await blocked.run('countAll()'); // Also check the action guard, independent of disabled DOM behavior.
+    assert.equal(blocked.run('recognizeCalls'), 0, setup);
+    assert.equal(blocked.run('calls.length'), 0, setup);
+  }
+  custom(v);
+  assert.equal(v.element('btn-recognize-all').hidden, false);
+});
+
+test('legacy builtin recognize-all uses fixed defaults without selection', async () => {
+  const v = ui();
+  v.run(`emptyViewer(); let recognizedItems = [];
+    countCustomBatch = async () => { throw new Error('custom batch must not run'); };
+    state.imageList = [{name: 'first.png'}, {name: 'second.png'}];
+    window.WECFU_DEFAULT_BATCH = {recognizeBuiltin: async item => {
+      recognizedItems.push(clone(item));
+      return {name: item.name, status: 'completed'};
+    }}; updateControls();`);
+  await v.element('btn-recognize-all').fire('click');
+  assert.deepEqual(plain(v.run('recognizedItems.map(item => item.name)')), ['first.png', 'second.png']);
+  assert.deepEqual(plain(v.run('recognizedItems.map(item => item.params)')), [defaults, defaults]);
+  assert.equal(v.run('recognizedItems.every(item => item.engine === ENHANCED_ENGINE)'), true);
+  assert.deepEqual(plain(v.run('state.workflow.lastBatchReport')), {
+    total: 2, stopped: false,
+    results: [{name: 'first.png', status: 'completed'}, {name: 'second.png', status: 'completed'}],
+  });
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+  assert.equal(v.run('state.doc'), null);
+  assert.equal(v.run('state.busy'), false);
+  assert.equal(v.element('btn-stop-run').hidden, true);
+  assert.deepEqual(v.errors, []);
+});
+
+test('real builtin batch preserves the fresh server before-state for Undo and uses fixed params', async () => {
+  const v = ui();
+  const fresh = {...plain(savedDoc), revision:42, counted:false, detections:[], machine_count_initial:0,
+    count_engine:null, count_model:null, count_params:null, params:{...savedParams,min_value:211}};
+  v.context.freshBatchBefore = fresh;
+  v.run(`let batchDraws=0, listReloads=0;
+    draw=()=>{batchDraws++;}; loadImages=async()=>{listReloads++;};
+    const batchMarks=[{id:81,cx:101,cy:102,r:4,source:'cv',score:.98,accepted:true}];
+    loadPlateImage=async url=>{calls.push({url,method:'GET',body:null});return {sourceHash:'a'.repeat(64)};};
+    jsonRequest=async(url,method='GET',body)=>{
+      calls.push({url,method,body:body===undefined?null:clone(body)});
+      if(url.endsWith('/detections')) return clone(freshBatchBefore);
+      if(url.endsWith('/reference')) return {status:'missing'};
+      if(url.includes('/run?')) return {...clone(freshBatchBefore),revision:43,counted:true,
+        detections:clone(batchMarks),machine_count_initial:1,reviewed:false,
+        count_engine:ENHANCED_ENGINE,count_model:null,count_params:clone(body),params:clone(body)};
+      throw Error('unexpected route '+url);
+    };`);
+  await v.element('btn-recognize-all').fire('click');
+  const posts=plain(v.run("calls.filter(call=>call.method==='POST')"));
+  assert.equal(posts.length,1);
+  const query=new URL(posts[0].url,'http://synthetic').searchParams;
+  assert.equal(query.get('engine'),'component_watershed_v1');
+  assert.equal(query.get('only_unrecognized'),'true');
+  assert.equal(query.get('protect_existing_edits'),'true');
+  assert.equal(query.get('expected_revision'),'42');
+  assert.equal(query.get('expected_image_sha256'),'a'.repeat(64));
+  assert.deepEqual(posts[0].body,defaults);
+  assert.equal(v.run('state.detections[0].id'),81);
+  assert.equal(v.run('state.doc.reviewed'),false);
+  assert.equal(v.run('state.doc.count_engine'),'component_watershed_v1');
+  assert.deepEqual(plain(v.run('state.history[0]')),fresh);
+  assert.equal(v.run('batchDraws'),1); assert.equal(v.run('listReloads'),1);
+  assert.equal(v.run('saves.length'),0);
+  v.run('undo()');
+  assert.deepEqual(plain(v.run('state.detections')),fresh.detections);
+  assert.deepEqual(plain(v.run('state.doc.params')),fresh.params);
+  assert.equal(v.run('state.doc.counted'),false);
+  assert.equal(v.run('state.saveQueues.get(keyFor()).revision'),43);
+  assert.equal(v.run('state.history.length'),0);
+  assert.deepEqual(plain(v.run('saves[0].detections')),[]);
+  assert.deepEqual(v.errors,[]);
+});
+
+test('wired stop lets the active batch item settle and never starts the next item', async () => {
+  const v = ui();
+  const started = new Promise(resolve => { v.context.batchItemStarted = resolve; });
+  v.run(`emptyViewer(); let batchNames = [], settleBatchItem;
+    state.imageList = [{name: 'first.png'}, {name: 'second.png'}];
+    window.WECFU_DEFAULT_BATCH = {recognizeBuiltin: async item => {
+      batchNames.push(item.name); batchItemStarted();
+      return new Promise(resolve => { settleBatchItem = resolve; });
+    }}; updateControls();`);
+  const running = v.element('btn-recognize-all').fire('click');
+  await started;
+  await v.element('btn-stop-run').fire('click');
+  assert.equal(v.run('state.busy'), true);
+  assert.equal(v.run('state.batchRun.report.results.length'), 0);
+  assert.deepEqual(plain(v.run('batchNames')), ['first.png']);
+  v.run("settleBatchItem({name: 'first.png', status: 'completed'})");
+  await running;
+  assert.deepEqual(plain(v.run('batchNames')), ['first.png']);
+  assert.deepEqual(plain(v.run('state.workflow.lastBatchReport')), {
+    total: 2, stopped: true, results: [{name: 'first.png', status: 'completed'}],
+  });
+  assert.match(v.element('batch-report-summary').textContent, /countStopped.*1 countCompleted.*1 batchRemaining/);
+  assert.equal(v.run('state.busy'), false);
+  assert.equal(v.element('btn-stop-run').hidden, true);
+  assert.deepEqual(v.errors, []);
+});
+
+test('failed and uncertain outcomes are reported separately from successful recognition and uncertainty clears stale viewer', async () => {
+  const v = ui();
+  v.run(`let emptiedViewers = 0; const originalEmptyViewer = emptyViewer;
+    emptyViewer = () => { emptiedViewers++; originalEmptyViewer(); };
+    state.imageList = [{name: 'failed.png'}, {name: 'first.png'}, {name: 'untouched.png'}];
+    window.WECFU_DEFAULT_BATCH = {recognizeBuiltin: async item => item.name === 'failed.png'
+      ? {name: item.name, status: 'failed', reason: 'synthetic inference failure'}
+      : {name: item.name, status: 'uncertain', reason: 'synthetic adoption response lost', stop: true}};`);
+  await v.element('btn-recognize-all').fire('click');
+  const report = plain(v.run('state.workflow.lastBatchReport'));
+  assert.deepEqual(report.results.map(item => [item.name, item.status]), [['failed.png', 'failed'], ['first.png', 'uncertain']]);
+  assert.equal(report.stopped, true);
+  assert.equal(report.total, 3);
+  assert.match(v.element('batch-report-summary').textContent, /countStopped.*0 countCompleted.*2 customBatchFailed.*1 batchRemaining/);
+  assert.equal(v.element('status').classList.contains('error'), true);
+  assert.match(v.element('batch-report-items').children[1].textContent, /batchUncertain/);
+  assert.equal(v.run('emptiedViewers'), 1);
+  assert.equal(v.run('state.imageName'), null);
+  assert.equal(v.run('state.doc'), null);
+  assert.equal(v.run('state.img'), null);
+  assert.equal(v.run('state.history.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+  assert.deepEqual(v.errors, []);
+});
+
+test('a failed batch item cannot produce a success-only summary when the queue finishes normally', async () => {
+  const v = ui(), before = plain(v.run('snapshot()'));
+  v.run(`window.WECFU_DEFAULT_BATCH = {recognizeBuiltin: async item => ({name: item.name,
+    status: 'failed', reason: 'synthetic failure'})};`);
+  await v.run('countAll()');
+  assert.equal(v.run('state.workflow.lastBatchReport.stopped'), false);
+  assert.match(v.element('batch-report-summary').textContent, /0 countCompleted.*1 customBatchFailed/);
+  assert.equal(v.element('status').classList.contains('error'), true);
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  assert.equal(v.run('saves.length'), 0);
+});
+
+test('completed batch adoption with changed displayed image bytes clears the viewer instead of drawing mismatched marks', async () => {
+  const v = ui();
+  v.run(`let drawnMarks = [], emptiedViewers = 0; draw = () => { drawnMarks.push(clone(state.detections)); };
+    const originalEmptyViewer = emptyViewer;
+    emptyViewer = () => { emptiedViewers++; originalEmptyViewer(); };
+    window.WECFU_DEFAULT_BATCH = {recognizeBuiltin: async item => ({name: item.name, status: 'completed',
+      hash: 'f'.repeat(64), before: clone(fixtureDoc), doc: {...clone(fixtureDoc), revision: 8,
+        detections: [{id: 99, cx: 10, cy: 10, r: 4, source: 'cv'}]}})};`);
+  await v.run('countAll()');
+  assert.equal(v.run('emptiedViewers'), 1);
+  // emptyViewer cancels a gesture (which can redraw old marks), but must never
+  // adopt/draw the new marks against the mismatched displayed source.
+  assert.equal(v.run('drawnMarks.some(marks => marks.some(mark => mark.id === 99))'), false);
+  assert.equal(v.run('state.doc'), null);
+  assert.equal(v.run('state.imageSourceHash'), null);
+  assert.equal(v.run('state.history.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+  assert.equal(v.run('state.workflow.lastBatchReport.results[0].status'), 'completed');
+});
+
+test('bulk selection is independent of the displayed photo and never records a human view or edit', async () => {
+  const v = ui(), before = plain(v.run('snapshot()'));
+  v.run(`state.imageList = [{name:'first.png'}, {name:'second.png'}, {name:'third.png'}];
+    let selectedViews = []; selectImage = async name => selectedViews.push(name); renderImageList();`);
+  await v.element('btn-bulk-select').fire('click');
+  const rows = v.element('image-list').children;
+  await rows[1].fire('click');
+  assert.equal(rows[1].attributes.get('aria-checked'), 'true');
+  assert.equal(v.run('state.imageName'), 'first.png');
+  assert.deepEqual(plain(v.run('selectedViews')), []);
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  assert.equal(v.run('saves.length'), 0);
+  assert.equal(v.run('calls.length'), 0);
+  await v.element('btn-bulk-all').fire('click');
+  assert.equal(v.run('state.bulkSelection.names.size'), 3);
+  await v.element('btn-bulk-all').fire('click');
+  assert.equal(v.run('state.bulkSelection.names.size'), 0);
+  assert.equal(v.element('btn-bulk-delete').disabled, true);
+  await v.element('btn-bulk-select').fire('click');
+  assert.equal(v.run('state.bulkSelection.enabled'), false);
+  assert.equal(rows[1].attributes.has('aria-checked'), false);
+});
+
+test('one select-all control toggles empty, partial and full selection with matching checkbox state', async () => {
+  const v = ui();
+  v.run(`state.imageList = [{name:'first.png'}, {name:'second.png'}, {name:'third.png'}];
+    renderImageList(); toggleBulkSelection();`);
+  const all = v.element('btn-bulk-all'), rows = v.element('image-list').children;
+  assert.equal(all.attributes.get('aria-checked'), 'false');
+  assert.equal(all.disabled, false);
+  await all.fire('click');
+  assert.equal(all.attributes.get('aria-checked'), 'true');
+  assert.equal(all.title, 'selectNoImages');
+  assert.equal(all.disabled, false, 'full selection must remain actionable to clear it');
+  assert.ok(rows.every(row => row.attributes.get('aria-checked') === 'true'));
+  await rows[1].fire('click');
+  assert.equal(all.attributes.get('aria-checked'), 'mixed');
+  assert.equal(all.title, 'selectAllImages');
+  assert.equal(v.run('state.bulkSelection.names.size'), 2);
+  await all.fire('click');
+  assert.equal(all.attributes.get('aria-checked'), 'true');
+  assert.equal(v.run('state.bulkSelection.names.size'), 3);
+  await all.fire('click');
+  assert.equal(all.attributes.get('aria-checked'), 'false');
+  assert.equal(v.run('state.bulkSelection.names.size'), 0);
+  assert.ok(rows.every(row => row.attributes.get('aria-checked') === 'false'));
+  assert.equal(v.element('btn-bulk-delete').disabled, true);
+  assert.equal(v.run('state.bulkSelection.enabled'), true, 'clearing keeps selection mode open');
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+});
+
+test('select-all is empty and disabled with no photos or outside selection mode', async () => {
+  const v = ui();
+  v.run('renderImageList();');
+  assert.equal(v.element('btn-bulk-all').disabled, true);
+  await v.element('btn-bulk-all').fire('click');
+  assert.equal(v.run('state.bulkSelection.names.size'), 0);
+  v.run('toggleBulkSelection(); state.imageList = []; updateBulkSelectionControls();');
+  assert.equal(v.element('btn-bulk-all').attributes.get('aria-checked'), 'false');
+  assert.equal(v.element('btn-bulk-all').disabled, true);
+  await v.element('btn-bulk-all').fire('click');
+  assert.equal(v.run('state.bulkSelection.names.size'), 0);
+  assert.equal(v.element('bulk-image-tools').hidden, true);
+});
+
+test('select-all cannot change selection while recognition, navigation or saving is busy', async () => {
+  for (const guard of ['state.busy = true', 'state.loading = true', 'state.crop = {}',
+    'state.modelPreview.loading = true', 'state.modelPreview.pendingApply = {}']) {
+    const v = ui();
+    v.run(`state.imageList = [{name:'first.png'}, {name:'second.png'}]; renderImageList();
+      toggleBulkSelection(); toggleBulkImage('first.png'); ${guard}; updateBulkSelectionControls();`);
+    assert.equal(v.element('btn-bulk-all').disabled, true, guard);
+    assert.equal(v.element('btn-bulk-all').attributes.get('aria-checked'), 'mixed', guard);
+    await v.element('btn-bulk-all').fire('click');
+    assert.deepEqual(plain(v.run('Array.from(state.bulkSelection.names)')), ['first.png'], guard);
+    assert.equal(v.run('calls.length'), 0, guard);
+  }
+});
+
+test('select-all markup has a leading decorative indicator and one accessible checkbox control', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../wecfu/server/static/index.html'), 'utf8');
+  assert.match(html, /id="btn-bulk-all"[^>]*role="checkbox"[^>]*aria-checked="false"><span class="bulk-all-indicator" aria-hidden="true"><\/span><span data-i18n="selectAllImages">/);
+  assert.doesNotMatch(html, /id="btn-bulk-none"/);
+});
+
+test('cancelled bulk deletion sends no deletion, preserves selection and saves no state', async () => {
+  const v = ui();
+  v.run(`state.imageList = [{name:'first.png'}, {name:'second.png'}]; renderImageList(); toggleBulkSelection(); selectBulkImages(true);
+    let flushed = 0; flushEdits = async () => { flushed++; };`);
+  v.window.confirm = () => false;
+  await v.element('btn-bulk-delete').fire('click');
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('flushed'), 0);
+  assert.equal(v.run('state.bulkSelection.names.size'), 2);
+  assert.equal(v.run('state.imageList.length'), 2);
+});
+
+test('bulk deletion flushes first, removes only the chosen photos sequentially and preserves unchosen view', async () => {
+  const v = ui(), before = plain(v.run('snapshot()'));
+  v.window.confirm = () => true;
+  v.run(`state.imageList = [{name:'first.png'}, {name:'a & b.png'}, {name:'third.png'}]; renderImageList();
+    toggleBulkSelection(); toggleBulkImage('a & b.png'); toggleBulkImage('third.png');
+    let order = []; flushEdits = async () => order.push('flush');
+    jsonRequest = async (url, method) => { if (method !== 'DELETE') throw Error('wrong method'); order.push(url); return {ok:true}; };`);
+  await v.element('btn-bulk-delete').fire('click');
+  assert.deepEqual(plain(v.run('order')), ['flush', '/api/batch/synthetic/image/a%20%26%20b.png', '/api/batch/synthetic/image/third.png']);
+  assert.deepEqual(plain(v.run('state.imageList')), [{name:'first.png'}]);
+  assert.equal(v.run('state.imageName'), 'first.png');
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  assert.equal(v.run('state.bulkSelection.enabled'), false);
+  assert.deepEqual(plain(v.run('state.bulkSelection.lastReport')), {removed:['a & b.png','third.png'],failed:[]});
+});
+
+test('deleting the displayed photo selects a remaining photo; failed removals stay selected and are reported', async () => {
+  const v = ui(); v.window.confirm = () => true;
+  v.run(`state.imageList = [{name:'first.png'}, {name:'fail.png'}, {name:'keep.png'}]; renderImageList();
+    toggleBulkSelection(); toggleBulkImage('first.png'); toggleBulkImage('fail.png');
+    let opened = []; selectImage = async name => opened.push(name);
+    jsonRequest = async (url, method) => { if (url.endsWith('/fail.png')) throw Object.assign(new Error('synthetic failure'),{status:500}); return {ok:true}; };`);
+  await v.element('btn-bulk-delete').fire('click');
+  assert.equal(v.run('state.doc'), null);
+  assert.equal(v.run("state.saveQueues.has('synthetic\\nfirst.png')"), false);
+  assert.deepEqual(plain(v.run('opened')), ['fail.png']);
+  assert.deepEqual(plain(v.run('state.imageList.map(i=>i.name)')), ['fail.png','keep.png']);
+  assert.deepEqual(plain(v.run('Array.from(state.bulkSelection.names)')), ['fail.png']);
+  assert.equal(v.element('status').classList.contains('error'), true);
+  assert.match(v.element('status').title, /fail.png: synthetic failure/);
+});
+
+test('all deleted or already absent photos leave an empty viewer; no retry on uncertain deletion', async () => {
+  const v = ui(); v.window.confirm = () => true;
+  v.run(`renderImageList(); toggleBulkSelection(); selectBulkImages(true);
+    jsonRequest = async (url, method) => { calls.push({url,method}); throw Object.assign(new Error('already absent'), {status:404}); };`);
+  await v.element('btn-bulk-delete').fire('click');
+  assert.equal(v.run('state.imageList.length'), 0);
+  assert.equal(v.run('state.doc'), null);
+  assert.equal(v.element('bulk-image-tools').hidden, true);
+  assert.equal(v.run('calls.length'), 1);
+  assert.equal(v.run('state.bulkSelection.lastReport.removed.length'), 1);
+});
+
+test('pending saves, recognition and verification contexts cannot trigger bulk deletion', async () => {
+  for (const guard of ['state.busy = true', 'state.loading = true', 'state.crop = {}',
+    'state.modelPreview.loading = true', 'state.modelPreview.pendingApply = {}', 'state.review.requested = true']) {
+    const v = ui(); v.window.confirm = () => { throw new Error('must not confirm'); };
+    v.run('renderImageList(); toggleBulkSelection(); selectBulkImages(true); ' + guard);
+    await v.run('removeSelectedImages()');
+    assert.equal(v.run('calls.length'), 0, guard);
+  }
+  const v = ui(); v.window.confirm = () => true;
+  v.run(`renderImageList(); toggleBulkSelection(); selectBulkImages(true); flushEdits = async () => { throw Error('save failed'); };`);
+  await assert.rejects(v.run('removeSelectedImages()'), /save failed/);
+  assert.equal(v.run('state.busy'), false);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('state.bulkSelection.names.size'), 1);
+});
+
+test('changing batch or refreshing removed names cannot leak stale bulk selection into another batch', () => {
+  const v = ui();
+  v.run('renderImageList(); toggleBulkSelection(); selectBulkImages(true); state.batch = "other"; updateBulkSelectionControls();');
+  assert.equal(v.run('state.bulkSelection.enabled'), false);
+  assert.equal(v.run('state.bulkSelection.names.size'), 0);
+  v.run(`toggleBulkSelection(); selectBulkImages(true); state.imageList = [{name:'other.png'}]; updateBulkSelectionControls();`);
+  assert.equal(v.run('state.bulkSelection.names.size'), 0);
+  assert.equal(v.element('btn-bulk-delete').disabled, true);
+});
+
+test('unified path import declares unknown rather than inventing main/blank/back metadata', async()=>{
+  const v=ui(),before=plain(v.run('snapshot()'));
+  v.run(`$('import-view').value='main'; jsonRequest=async(url,method,body)=>{
+    calls.push({url,method,body:clone(body)});return {batch:'synthetic'};
+  };`);
+  await v.run("ingestPath('/synthetic/folder')");
+  assert.deepEqual(plain(v.run('calls')), [{url:'/api/ingest',method:'POST',body:{paths:['/synthetic/folder'],view:'unknown',batch:'synthetic'}}]);
+  assert.deepEqual(plain(v.run('snapshot()')),before);
+  assert.equal(v.element('source-view-metadata').hidden,true);
+  const html=fs.readFileSync(path.join(__dirname,'../wecfu/server/static/index.html'),'utf8');
+  assert.equal(html.includes('id="import-view"'),false);
+});
+
+test('unified file import declares unknown and does not request inference automatically', async()=>{
+  const v=ui();
+  v.context.FormData=class {constructor(){this.entries=[];}append(k,value){this.entries.push([k,value]);}};
+  v.context.XMLHttpRequest=class {
+    constructor(){this.upload={addEventListener(){}};this.status=200;this.responseText=JSON.stringify({batch:'synthetic'});}
+    open(method,url){this.method=method;this.url=url;}
+    send(data){v.context.uploaded={method:this.method,url:this.url,entries:data.entries};this.onload();}
+  };
+  await v.run("uploadFiles([{name:'synthetic.jpg'},{name:'skip.txt'}])");
+  assert.deepEqual(plain(v.context.uploaded),{method:'POST',url:'/api/upload',entries:[['batch','synthetic'],['view','unknown'],['files',{name:'synthetic.jpg'}]]});
+  assert.equal(v.run('calls.length'),0);
+  assert.equal(v.run('saves.length'),0);
+});
+
+test('current default and custom recount bind to displayed SHA and preserve work on source conflict', async()=>{
+  for(const profile of ['default','custom']) {
+    const v=ui();if(profile==='custom')custom(v);
+    const before=plain(v.run('snapshot()'));
+    v.run(`jsonRequest=async(url,method='GET',body)=>{
+      calls.push({url,method,body:body===undefined?null:clone(body)});
+      if(url.endsWith('/reference'))return {status:'missing'};
+      throw Object.assign(Error('source changed'),{status:409});
+    };`);
+    await assert.rejects(v.run('recount()'),/source changed/);
+    const posts=plain(v.run("calls.filter(call=>call.method==='POST')"));
+    assert.equal(posts.length,1);
+    assert.equal(new URL(posts[0].url,'http://synthetic').searchParams.get('expected_image_sha256'),'a'.repeat(64));
+    assert.deepEqual(plain(v.run('snapshot()')),before);
+    assert.equal(v.run('state.history.length'),0);
+    assert.equal(v.run('saves.length'),0);
+    v.run("state.imageSourceHash=null;calls=[];");
+    await assert.rejects(v.run('recount()'),/recognitionSourceUnavailable/);
+    assert.equal(v.run('calls.length'),0);
+  }
+});
+
+test('custom batch binds fresh source bytes and never draws result on a stale displayed image', async()=>{
+  const v=ui();custom(v);
+  v.run(`let paintedMarks=[];draw=()=>paintedMarks.push(clone(state.detections));
+    loadPlateImage=async url=>{calls.push({url,method:'GET'});return {sourceHash:'b'.repeat(64)};};
+    jsonRequest=async(url,method='GET',body)=>{
+      calls.push({url,method,body:body===undefined?null:clone(body)});
+      if(url.endsWith('/detections'))return clone(fixtureDoc);
+      if(url.endsWith('/reference'))return {status:'missing'};
+      return {...clone(fixtureDoc),revision:8,count_engine:ENHANCED_ENGINE,count_params:clone(body),
+        detections:[{id:999,cx:120,cy:120,r:5,source:'cv'}]};
+    };`);
+  await v.run('countCustomBatch()');
+  const post=plain(v.run("calls.find(call=>call.method==='POST')"));
+  assert.equal(new URL(post.url,'http://synthetic').searchParams.get('expected_image_sha256'),'b'.repeat(64));
+  assert.equal(v.run('paintedMarks.some(marks=>marks.some(mark=>mark.id===999))'),false);
+  assert.equal(v.run('state.doc'),null);
+  assert.equal(v.run('state.imageSourceHash'),null);
+  assert.equal(v.run('state.history.length'),0);
+  assert.equal(v.run('saves.length'),0);
+  assert.deepEqual(plain(v.run('state.workflow.lastBatchReport.completed')),['first.png']);
 });

@@ -1,4 +1,4 @@
-# Publish a reviewed WeCFU release
+# Publish a reviewed WeCFU 1.2.1 release
 
 The existing public targets are:
 
@@ -9,30 +9,44 @@ The existing public targets are:
 | Hosted Docker application | https://huggingface.co/spaces/WeCFU/wecfu |
 
 Use a clean, reviewed release checkout. Keep private development history,
-workspaces, research notes and model caches outside it. The GitHub repository's
-previously published hardware files are not part of the Python/Conda artifacts
-or the hosted application. Do not copy them into the Hugging Face checkout.
+workspaces, research notes and model caches outside it. Previously published
+hardware files belong to GitHub only, not the Python/Conda artifacts or the
+Hugging Face application checkout.
 
-## Prepare one consistent release
+## Keep the release contract consistent
+
+For 1.2.1, the local default is **Ultra: fixed algorithm + SAM**. Lite preserves
+the improved classical method; Custom applies user-selected classical settings.
+New requests do not use the legacy Fusion route. Existing Fusion results and
+provenance remain readable; do not relabel them as current Ultra results.
+
+Hosted mode defaults to its classical baseline. It may offer an explicit,
+current-photo SAM preview when available; it does not run model batch recognition.
+Do not advertise local and hosted default recognition as identical.
 
 1. Set the same version in `wecfu/__init__.py`, `pyproject.toml` and `meta.yaml`.
-   Update CHANGELOG, installation examples and the model notices when applicable.
-2. Review every staged path and the public JSON resources. The package allowlist
-   is in MANIFEST.in and pyproject.toml. No photographs, model weight binaries,
-   source-view registries, private authorization records or research results
-   belong in the commit or build context.
-3. Run the maintained Python and Node tests. Exercise editing/export and model
-   candidate application in a disposable synthetic workspace. Check local and
-   hosted session isolation. Use the selected fixed model runtime and cache;
-   do not reuse a user's working directory for acceptance tests.
-4. Commit the final product files before building. The Conda recipe snapshots
-   Git HEAD; uncommitted edits will not be included.
+   Update CHANGELOG, installation examples and model notices where applicable.
+2. Review every staged path and public JSON resource. MANIFEST.in and
+   pyproject.toml define the package allowlist. Photographs, model weights,
+   source-view registries, private authorization records and research results
+   must stay outside the release and Docker context.
+3. Run the maintained Python and Node checks. In disposable synthetic
+   workspaces, verify imports, current/all recognition routing, manual-work
+   protection, source/revision conflicts, batch deletion, save/undo, export,
+   all five Help languages and hosted session isolation. Validate configured
+   model availability separately from a pure-classical request. Do not use an
+   active user's workspace for release acceptance.
+4. Verify warm-worker lifecycle and explicit cold rollback. Warm workers are
+   enabled by default in 1.2.1; `WECFU_SAM_WARM_WORKER=0` retains the cold route.
+   Do not change weights, numerical settings or thresholds as part of packaging.
+5. Commit the final reviewed product files before building. The Conda recipe
+   snapshots Git HEAD; uncommitted changes are not included.
 
-The model runtime uses Python 3.12. Its dependency pins are in the `models` extra.
+The model runtime uses Python 3.12 and the `models` extra's pinned dependencies.
 `wecfu/model_assets.json` fixes public source revisions, URLs, sizes and hashes.
-The setup command downloads those assets; model requests only read the verified
-local cache. Docker installs the official CPU PyTorch wheels and prepares that
-cache before starting the web application.
+Setup downloads that shared asset manifest, including retained legacy assets;
+counting requests only read the verified cache. The Docker image installs the
+CPU runtime and prepares its cache to support explicit hosted SAM previews.
 
 ## Build and inspect artifacts
 
@@ -41,65 +55,69 @@ From the reviewed release commit:
 ```sh
 python -m build
 conda build . -c conda-forge --no-anaconda-upload
-python tests/test_release_packaging.py dist/wecfu-1.2.0-py3-none-any.whl dist/wecfu-1.2.0.tar.gz
+python tests/test_release_packaging.py dist/wecfu-1.2.1-py3-none-any.whl dist/wecfu-1.2.1.tar.gz
 ```
 
-Pass the actual `.conda` output path printed by conda-build to the same auditor:
+Pass the actual `.conda` path printed by conda-build to the same auditor:
 
 ```sh
-python tests/test_release_packaging.py /path/to/wecfu-1.2.0-py_0.conda
+python tests/test_release_packaging.py /path/to/wecfu-1.2.1-py_0.conda
 ```
 
-The auditor reads archive members without installing or extracting them. It
-rejects unapproved resources and checks that all public runtime JSON, setup
-code, interface files and third-party notices are present. The `.conda` reader
-requires `zstandard`, supplied by the build environment. Also install the built
-core package and wheel in clean environments and run their CLI/API smoke tests.
-A source-tree test pass does not prove that the distribution contains its assets.
+The auditor reads archive members without installation or extraction. It checks
+for required runtime code/resources and rejects unapproved data. Its `.conda`
+reader requires `zstandard`. Install the built artifacts in clean environments
+and run CLI/API smoke checks; a source-tree pass alone does not validate the
+package contents. Confirm Ultra/Lite/Custom configuration, required warm-worker
+files, translated Help and the explicit unavailable-model behavior in the
+installed artifact. A core-only Conda install must still offer Lite/Custom.
 
 ## Publish GitHub and Conda
 
 After artifact inspection and clean-install validation:
 
 ```sh
-git tag v1.2.0
-git push github HEAD:main v1.2.0
-gh release create v1.2.0 --repo WeStrainGroup/WeCFU --verify-tag \
-  dist/wecfu-1.2.0-py3-none-any.whl dist/wecfu-1.2.0.tar.gz \
-  --title 'WeCFU 1.2.0' --notes-file CHANGELOG.md
+git tag v1.2.1
+git push github HEAD:main v1.2.1
+gh release create v1.2.1 --repo WeStrainGroup/WeCFU --verify-tag \
+  dist/wecfu-1.2.1-py3-none-any.whl dist/wecfu-1.2.1.tar.gz \
+  --title 'WeCFU 1.2.1' --notes-file CHANGELOG.md
 anaconda --at anaconda.org whoami
-anaconda --at anaconda.org upload /path/to/wecfu-1.2.0-py_0.conda
+anaconda --at anaconda.org upload /path/to/wecfu-1.2.1-py_0.conda
 ```
 
-Use the actual reviewed branch/ref if it differs from `main`; do not publish a
-stale branch merely because an example names it. Existing authentication can be
-reused. Never place tokens or passwords in repository files or command output.
-After upload, verify the public release asset list and the Conda channel version.
+Use the actual reviewed ref if it differs from `main`. Reuse existing
+credentials; do not put tokens or passwords in repository files or output.
+Verify the public asset list and Conda channel version after upload. Do not
+replace an existing published version's artifacts with different bytes; use a
+new release version when a published package needs correction.
 
-The noarch Conda package deliberately omits large model dependencies and weights.
-Publish the matching GitHub wheel first so INSTALL.md's model-extra command is
-usable as soon as the Conda version appears. Do not advertise the core-only
-package as having a ready-to-run Fusion model cache.
+The noarch Conda package omits large model dependencies and weights. Publish
+the matching GitHub wheel first so INSTALL.md's optional-model command works
+when the Conda release becomes visible. Do not describe a core-only install as
+having a ready SAM runtime. Existing users should export, stop the server,
+upgrade, restart with their existing workspace and reload the browser page.
+An upgrade does not automatically recount stored results.
 
 ## Update the existing Hugging Face Space
 
 Use a separate checkout of the existing Space `main`, preserving its history.
-Copy only the reviewed public application files, `pyproject.toml`, Dockerfile,
+Copy only reviewed public application files, `pyproject.toml`, Dockerfile,
 `.dockerignore`, LICENSE, NOTICE, THIRD_PARTY_NOTICES.md and LICENSES. Use
-`README_HF.md` as that checkout's `README.md`. Keep ordinary GitHub documentation
-separate. Review deletions as well as additions so removed code is not left behind.
+`README_HF.md` as the Space's `README.md`. Review deletions too, so removed code
+is not left behind. Do not copy private data, the application's full Git
+history or the hardware directory into the Space.
 
-Commit the reviewed diff and push normally to the existing Space `main`. Do not
-merge the application's entire Git history, reset a shared working checkout or
-force-push the Space. The Docker build installs the model extra, downloads its
-fixed assets and runs an asset check; a failure must leave deployment incomplete
-rather than removing model functionality.
+Commit the reviewed diff and push normally to the existing Space `main`.
+Do not reset a shared checkout or force-push. Model setup/build verification
+must fail clearly if assets or dependencies are unavailable.
 
-Wait for the actual build and runtime status. Then verify the displayed version,
-Fusion v2 availability, a synthetic inference request, candidate application,
-export and two separate visitor sessions. A successful Git push alone is not a
-successful deployment. Record the published source commit, artifact hashes and
-Space commit together; report any failed channel explicitly.
+Wait for actual build and runtime completion. Check the displayed version,
+default Lite/baseline route, available explicit SAM preview, multilingual Help,
+synthetic upload/count/apply/export and two isolated visitor sessions. A
+successful push is not a successful deployment. Record the source commit,
+artifact hashes and Space commit together; report any failed channel explicitly.
+Do not infer model readiness from an ordinary page load.
 
-Hosted workspaces remain ephemeral. Exported user files and sessions are not
-part of a release, and redeployment can discard active hosted sessions.
+Hosted workspaces are temporary. Redeployment can discard active sessions;
+user uploads and exported files are not part of a release.

@@ -589,15 +589,15 @@ Object.assign(I18N.en, {
   fusionV2Warning: 'Separate internal trial. It keeps SAM marks and adds selected candidates; supplemental centers may be offset. Check counts, missed and false marks before adopting. It does not replace the default method.',
   methodFusion: 'Fusion enhancement (trial)', fusionSavedSource: 'Saved: fusion enhancement (trial)',
   fusionWarning: 'Keeps the SAM result from this trial and adds selected supplemental candidates. Supplemental circles only indicate centers; they are not the true colony outlines. Check missed, false and merged marks before adopting.',
-  fusionRoiHint: 'Fusion trials support front/blank photos and automatic medium boundaries only, at a fixed 95% radius. Use another method for manually adjusted boundaries. The whole photo remains visible. Amber dashed marks are unsaved candidates; adoption replaces current marks and can be undone.',
-  fusionAutomaticPlateRequired: 'Default recognition requires the automatic medium boundary. This photo has a manually adjusted boundary, which will be kept. Switch to Custom recognition or continue manual correction.',
+  fusionRoiHint: 'Fusion supports front/blank photos and the automatic medium boundary, at a fixed 95% radius. The gray dashed circle shows this range. Rose solid circles are machine marks; preview marks stay unsaved until adopted. Adoption replaces current marks and can be undone.',
+  fusionAutomaticPlateRequired: 'Detailed check requires the automatic medium boundary. This photo has a manually adjusted boundary, which will be kept. Switch to Custom recognition or continue manual correction.',
   samWarning: 'The local model provides candidates that still need checking for missed and false marks. Color, brightness and other counting sliders apply only to traditional recognition.',
-  samRoiHint: 'SAM analyzes the full photo. Machine mark centers are kept inside the cyan dashed circle, fixed at 95% of the medium radius. Amber dashed marks are unsaved candidates. Changing the boundary needs a new trial; the full photo stays visible and editable.',
+  samRoiHint: 'SAM analyzes the full photo. The gray dashed circle shows the retained range, fixed at 95% of the medium radius. Rose solid circles are machine marks; preview marks stay unsaved until adopted. Changing the boundary requires new recognition.',
   modelTrial: 'Run model trial', modelDiscard: 'Discard trial', modelApply: 'Replace current marks with trial results',
   modelRetry: 'Confirm pending replacement', modelReplaceHint: 'Replaces every current mark, including manual points. You can undo it.',
   modelWarning: 'Experimental model; real-photo accuracy has not been verified. Large spreading or confluent growth may be missed. Check every colony.',
   modelEmptyWarning: 'No detections does not mean a blank plate. Large areas of growth may be missed.',
-  modelRoiHint: 'Candidates whose centers are inside the cyan dashed circle are retained. Changed coverage needs a new trial; amber dashed marks are unsaved candidates.',
+  modelRoiHint: 'The gray dashed circle shows the retained range. Rose solid circles are machine marks; preview marks stay unsaved until adopted. Changing the range requires new recognition.',
   modelModeHint: 'Run a model trial to inspect candidates first. Adopt the result before continuing manual corrections.',
   modelManualHint: 'Pure manual mode: click the image to add or remove marks.',
   modelLoading: 'Running a temporary model trial…', modelTemporary: 'Temporary trial', modelCurrent: 'Current marks', modelNotAdopted: 'not adopted',
@@ -623,15 +623,15 @@ Object.assign(I18N['zh-CN'], {
   fusionV2Warning: '独立内部试用版本，保留 SAM 标记并补充筛选后的候选；补充点的中心位置仍可能偏移。采用前请核对数量、漏检与误检；默认识别方法不变。',
   methodFusion: '融合增强（试用）', fusionSavedSource: '已保存：融合增强（试用）',
   fusionWarning: '保留本次 SAM 识别结果，并补充筛选后的候选。补充圈仅提示菌落中心，不代表菌落真实边界；采用前请检查漏检、误检和粘连。',
-  fusionRoiHint: '融合试用仅支持正面/空白图和自动培养基边界；手工调圈请选其他方法。范围固定为半径的 95%，整张照片始终可见。琥珀虚线是未保存候选；主动采用后替换当前标记，可撤销。',
-  fusionAutomaticPlateRequired: '默认识别需要自动培养基边界。这张图已手动调整边界，将保留现有范围；可切换到自定义识别，或继续手动校正。',
+  fusionRoiHint: '融合识别支持正面/空白图和自动培养基边界，范围固定为半径的 95%。灰色细虚线表示范围；灰粉实线圈表示机器标记。预览尚未保存，采用后替换当前标记，可撤销。',
+  fusionAutomaticPlateRequired: '精细补检需要自动培养基边界。这张图已手动调整边界，将保留现有范围；可切换到自定义识别，或继续手动校正。',
   samWarning: '本地模型仅提供候选，仍需逐个核对漏检与误检。颜色、亮度等滑条仅适用于传统识别。',
-  samRoiHint: 'SAM 整图分析，青色虚线内保留机器标记中心，范围固定为培养基半径的 95%。琥珀虚线为未保存候选。调圈后需重新试算；整张照片始终可见、可补点。',
+  samRoiHint: 'SAM 整图分析，灰色细虚线表示保留范围，固定为培养基半径的 95%。灰粉实线圈表示机器标记；预览尚未保存，采用后才生效。调圈后需重新识别。',
   modelTrial: '模型试算', modelDiscard: '丢弃试算', modelApply: '用试算结果替换当前标记',
   modelRetry: '确认待定替换结果', modelReplaceHint: '将替换全部当前标记（包括人工添加的点），可撤销。',
   modelWarning: '实验模型，尚未完成真实照片的人工准确率评估；大面积融合或铺展生长可能漏检，请逐个核对。',
   modelEmptyWarning: '未检出不代表空白皿；大面积生长可能漏检。',
-  modelRoiHint: '圆内中心的候选会保留，改变范围后需重新试算；青色细虚线为当前范围，琥珀色虚线为未保存候选。',
+  modelRoiHint: '灰色细虚线表示保留范围，灰粉实线圈表示机器标记；预览尚未保存，采用后才生效。改变范围后需重新识别。',
   modelModeHint: '点击模型试算先查看候选，采用后可继续手动校正。',
   modelManualHint: '纯手动模式：点击图片添加或删除标记。',
   modelLoading: '正在进行临时模型试算…', modelTemporary: '临时试算', modelCurrent: '当前标记', modelNotAdopted: '未采用',
@@ -697,7 +697,7 @@ Object.assign(I18N.en, {
   legendAuto: 'Machine · rose', legendManual: 'Manual · blue',
   internalBuild: 'Internal', imagesTitle: 'Photos', exportMenu: 'Export', imageActions: 'More',
   importPath: 'Import from a path', resultDetails: 'Result details', interactionHelp: 'Controls',
-  recognitionProfile: 'Recognition settings', profileDefault: 'Default', profileCustom: 'Custom',
+  recognitionProfile: 'Recognition settings', profileDefault: 'Ultra', profileCustom: 'Custom',
   recognizeCurrent: 'Recognize current', customSettings: 'Adjustments',
   manualMarkSettings: 'Manual marks', manualMarkRadius: 'Radius (px)', manualMarkHint: 'Only affects new manual marks.',
   customRunAll: 'Recognize all', presetWhite: 'Default',
@@ -713,7 +713,7 @@ Object.assign(I18N.en, {
   dropHint: 'Drop photos here to add', dropSubHint: 'Your original photos stay unchanged.',
   pasteHint: 'Folder or image path', ingestBtn: 'Import path',
   boundaryViewHint: 'The boundary follows the growth medium, excluding the dish wall. The full photo stays visible.',
-  customDraftHint: 'Color and shape rules, not default model tuning. Settings carry across photos; Apply recounts.',
+  customDraftHint: 'Adjust the traditional algorithm’s color and shape rules. Settings carry across photos; Apply recounts.',
   previewExplanation: 'Bright mint shows selected pixels, not final colonies. Apply to recount.',
   customBatchProtectedHint: 'Batch skips photos with manual edits, notes or human verification.',
   customBatchFailed: 'Failed',
@@ -726,7 +726,7 @@ Object.assign(I18N['zh-CN'], {
   legendAuto: '机器 · 灰粉', legendManual: '人工 · 灰蓝',
   internalBuild: '内部版', imagesTitle: '照片', exportMenu: '导出', imageActions: '更多',
   importPath: '从路径导入', resultDetails: '结果信息', interactionHelp: '操作说明',
-  recognitionProfile: '识别设置', profileDefault: '默认', profileCustom: '自定义',
+  recognitionProfile: '识别设置', profileDefault: 'Ultra', profileCustom: '自定义',
   recognizeCurrent: '识别当前', customSettings: '调整',
   manualMarkSettings: '手动标记', manualMarkRadius: '半径（px）', manualMarkHint: '仅影响之后添加的标记。',
   customRunAll: '重新识别全部', presetWhite: '默认',
@@ -742,7 +742,7 @@ Object.assign(I18N['zh-CN'], {
   dropHint: '拖入照片即可添加', dropSubHint: '原始照片保持不变。',
   pasteHint: '文件夹或图片路径', ingestBtn: '导入路径',
   boundaryViewHint: '边界以培养基为准，不含皿壁；完整照片始终可见。',
-  customDraftHint: '按颜色、形状计数，并非调整默认模型。参数跨图保留，应用时生效。',
+  customDraftHint: '调整传统算法的颜色、形状规则。参数跨图保留，应用时生效。',
   previewExplanation: '亮青绿色是选中像素，并非最终菌落；点击「应用」重新计数。',
   customBatchProtectedHint: '批量跳过人工编辑、有备注或核验记录的图片。',
   customBatchFailed: '失败',
@@ -751,36 +751,83 @@ Object.assign(I18N['zh-CN'], {
 });
 
 
-Object.assign(I18N.en, {
-  helpBody: `<h3>Default recognition</h3>
-<p>Add photos from the sidebar, then select one. Choose <b>Default</b> and <b>Recognize current</b> to inspect a preview. Check missed and false marks, then choose <b>Adopt result</b>. Adoption replaces the current marks, including manual additions; you can undo it. A preview alone does not replace your saved count.</p>
-<h3>Custom recognition</h3>
-<p><b>Custom</b> recounts using color, brightness, shape and related conditions; its sliders do not tune the default intelligent recognizer. Results may differ. The photo list stays on the left; the <b>Adjustments</b> column sits beside the image. Your custom settings persist between photos. Gray live preview shows threshold foreground, not final colonies. Choose <b>Apply</b> to recount this photo or <b>Recognize all</b> for a batch. Batch recognition skips photos with manual edits, notes, human verification records or pure manual mode. Applying to a protected current photo requires confirmation.</p>
-<h3>Photo status</h3><p>Hollow: not recognized. Light gray: machine recognition completed. Dark gray: viewed or edited. Opening a photo records it as viewed; this is separate from accuracy verification. Both use solid circles: muted rose for machine marks and muted blue for manual marks. Use <b>Manual marks</b> above the photo to adjust the size of new manual marks; this does not change recognition settings or existing marks.</p><h3>Correct marks and navigate</h3>
-<p>Left click adds a mark; right click removes one. Quickly drag a box to remove several marks. Hold, then drag to pan; use the wheel to zoom. Click outside the photo or press <b>F</b> to fit the full photo. The on-image arrows and <b>← / →</b> move between photos; <b>Cmd/Ctrl Z</b> undoes an edit. When a text field, number, slider or selector is focused, arrow keys stay with that control and do not switch photos. <b>More</b> contains pure manual mode, clear marks and remove photo.</p>
-<h3>Growth-medium boundary</h3>
-<p>The recognition boundary follows the growth-medium surface, excluding the dish wall. It limits machine recognition; it does not crop the displayed photo. The full photo remains visible. When needed, use <b>More → Adjust medium boundary</b>. Some default recognition methods require an automatic boundary and supported photo views; follow the restriction shown on screen. Marker circles indicate locations, not the true outlines of colonies.</p>
-<section class="review-help"><h3>Human verification</h3>
-<p>In a review queue, correct the supplied marks and explicitly confirm and save under <b>Accuracy verification</b>; do not use the recognition or batch recount workflow. Viewing a photo does not count as verification. Confirm the growth-medium boundary only if you checked it. Later edits can invalidate an earlier confirmation, so refresh and confirm again when required.</p></section>
+// Current help is localized in every supported language. Keep the author credit intact.
+const HELP_CONTENT = {
+  en: `<h3>Import and choose a mode</h3>
+<p>Use <b>Add images</b> or drag photos/folders into the sidebar. Local use also supports <b>Import path</b>. Importing does not start recognition. <b>Ultra</b> combines the improved algorithm with SAM and needs more computation; <b>Lite</b> uses the lighter algorithm. <b>Custom</b> lets you adjust its parameters. The hosted version offers Lite and Custom. Use ⓘ for mode details.</p>
+<h3>Recognize photos</h3>
+<p>In Ultra or Lite, <b>Recognize all</b> processes unrecognized photos sequentially, keeping existing results and manual work. Leave the page open; <b>Stop after this image</b> stops after the current photo.</p>
+<p><b>Recognize current</b> processes the selected photo. Ultra saves new results directly; existing results first appear as a preview. <b>Adopt result</b> replaces saved marks and can be undone; <b>Cancel preview</b> keeps them. Lite recounts directly, asking before replacing edited results. In Lite, <b>Detailed check · SAM</b>, when available, offers a SAM preview with the same adopt/cancel choice.</p>
+<h3>Custom adjustments</h3>
+<p>Drag sliders or click a number to type. Bright mint in <b>Live foreground preview</b> shows selected pixels, not final colonies. <b>Apply</b> stores settings for this page session and closes the panel; it does not recognize photos. Then choose <b>Recognize current</b> or <b>Recognize all</b>. <b>Adjust</b> reopens the panel; unapplied changes are not used. These settings adjust the algorithm, not SAM. Custom batch recognition reruns machine-only results but skips manual edits, notes, verification records and manual mode. Current-photo recount asks before replacing protected work.</p>
+<h3>Check marks</h3>
+<p>Machine marks are muted rose; manual marks muted blue, both solid. Circles locate centers, not exact outlines. Click to add, right-click to remove, or quickly drag a box to remove several. Hold then drag to pan; wheel to zoom; <b>F</b> to fit. <b>← / →</b> changes photos; <b>Cmd/Ctrl Z</b> undoes edits. Arrow keys stay with a focused input, slider or selector. <b>Manual marks</b> changes only new mark sizes. Use <b>More → Adjust medium boundary</b> when needed.</p>
+<h3>Status and deletion</h3>
+<p>Hollow dot: unrecognized. Light gray: machine result. Dark gray: viewed or edited, not accuracy verification. <b>Batch delete</b> lets you select photos; <b>Select all</b> toggles all/none. <b>Delete selected</b> asks for confirmation, then removes workspace photos and records. Original files remain; deletion cannot be undone.</p>
 <h3>Notes and export</h3>
-<p>Notes belong to the current photo. Use <b>Export</b> for a CSV of counts, or a bundle containing counts and annotated results. Your original photos stay unchanged.</p>` + AUTHORS_FOOTER,
-});
-Object.assign(I18N['zh-CN'], {
-  helpBody: `<h3>默认识别</h3>
-<p>从侧栏添加照片并选中一张，使用<b>默认</b>，点击<b>识别当前</b>查看预览。核对漏检与误检后，再点击<b>采用结果</b>。采用会替换当前标记（含人工添加），可撤销；仅查看预览不会替换已保存计数。</p>
-<h3>自定义识别</h3>
-<p><b>自定义</b>按颜色、亮度、形状等条件重新计数，滑条并非调整默认智能识别，结果可能不同。左侧照片列表始终保留，<b>调整</b>栏紧邻图片。参数会跨图片保留；亮青绿色实时预览仅表示阈值前景，并非最终菌落。点击<b>应用</b>处理这张图，或<b>重新识别全部</b>批量处理。批量会跳过已有人工编辑、备注、人工核验记录及纯手动模式的图片；单张重新计数遇到受保护结果时需要确认。</p>
-<h3>照片状态</h3><p>空心：未识别；浅灰：机器识别完成；深灰：已浏览或编辑。打开图片后自动记录浏览状态，与准确率核验分开。两类标记均使用实线：机器为灰粉色，人工为灰蓝色。在图片上方的<b>手动标记</b>中调整新增标记大小，不影响识别参数或已有标记。</p><h3>标记与浏览</h3>
-<p>左击添加标记，右击删除；快速拖框可批量取消。长按后拖动可平移，滚轮缩放。点击图片外或按<b>F</b>回到全图最佳视野。图片两侧按钮和<b>← / →</b>切换图片，<b>Cmd/Ctrl Z</b>撤销编辑。正在编辑文字、数值、滑条或下拉选项时，方向键保留给当前控件，不切换图片。<b>更多</b>中可使用纯手动模式、清空标记和移除图片。</p>
-<h3>培养基边界</h3>
-<p>机器识别边界沿培养基底部平面设置，不包含皿壁；它限制机器识别范围，不裁掉给人查看的照片。完整照片始终可见。需要时在<b>更多 → 调整培养基边界</b>中修正。部分默认识别方法要求自动边界和受支持的照片视角，请遵循页面提示。标记圈用于定位，不代表菌落真实轮廓。</p>
-<section class="review-help"><h3>人工核验</h3>
-<p>核验队列中请校正已提供的标记，在<b>准确率核验</b>中明确确认并保存，不使用识别或批量重算流程。仅浏览图片不算完成核验；培养基边界仅在亲自检查后勾选。后续编辑可能使已有确认失效，需要时刷新并重新确认。</p></section>
+<p>Notes autosave for the current photo. <b>Export</b> saves counts as CSV, or a ZIP with annotated images and state files. The hosted version uploads photos to a temporary server session; export before leaving.</p>
+<section class="review-help"><h3>Review queues</h3><p>Correct the supplied marks, explicitly confirm under <b>Accuracy verification</b>, then choose <b>Save colony verification</b>. Viewing does not confirm anything. Later edits may invalidate confirmation. Confirm the medium boundary only if you checked it.</p></section>`,
+  'zh-CN': `<h3>导入与模式</h3>
+<p>点击<b>添加板子图片</b>，或将照片、文件夹拖入侧栏。本地还可使用<b>导入路径</b>。导入不会自动识别。<b>Ultra</b>结合改进算法与 SAM，计算量较大；<b>Lite</b>使用较轻量的算法；<b>自定义</b>可调整算法参数。网页版提供 Lite 和自定义。点击 ⓘ 查看模式说明。</p>
+<h3>识别照片</h3>
+<p>Ultra 或 Lite 下，<b>识别全部</b>逐张处理未识别照片，保留已有结果和人工操作。运行时请保持页面打开；点击<b>完成当前板子后停止</b>，会在当前照片完成后停下。</p>
+<p><b>识别当前</b>处理选中的照片。Ultra 对新照片直接保存结果，对已有结果先显示预览。<b>采用结果</b>会替换已保存标记，可撤销；<b>取消预览</b>保留原结果。Lite 直接重新计数，替换人工修改前会询问。Lite 下若<b>精细补检 · SAM</b>可用，可查看 SAM 预览，再决定采用或取消。</p>
+<h3>自定义调整</h3>
+<p>拖动滑条，或点击数字输入。<b>实时前景预览</b>中的亮青绿表示选中像素，并非最终菌落。<b>应用</b>只保存本页面的参数并收起面板，不执行识别；之后再选择<b>识别当前</b>或<b>识别全部</b>。点击<b>调整</b>可重新展开，未应用的修改不会用于识别。这些参数调整算法，不调整 SAM。自定义批量会重新识别仅有机器结果的照片，跳过人工编辑、备注、核验记录和纯手动模式；单张重算替换受保护结果前会询问。</p>
+<h3>检查标记</h3>
+<p>机器标记为灰粉，人工标记为灰蓝，均为实线。圆圈表示中心位置，不是精确轮廓。左击添加、右击删除，快速拖框批量删除；长按拖动平移，滚轮缩放，<b>F</b>显示全图。<b>← / →</b>切换照片，<b>Cmd/Ctrl Z</b>撤销编辑。输入框、滑条或下拉框有焦点时，方向键留给该控件。<b>手动标记</b>只调整新增标记的大小；需要时可在<b>更多 → 调整培养基边界</b>中修正边界。</p>
+<h3>状态与删除</h3>
+<p>空心点表示未识别，浅灰表示已有机器结果，深灰表示已浏览或编辑，不代表准确率核验。点击<b>批量删除</b>选择照片；<b>全选</b>可切换全选与全不选。点击<b>删除所选</b>并确认后，移除工作区中的照片和计数记录，原始文件不变；删除不可撤销。</p>
 <h3>备注与导出</h3>
-<p>备注对应当前图片。通过<b>导出</b>保存计数CSV，或打包保存计数和标注结果。原始照片保持不变。</p>` + AUTHORS_FOOTER,
-});
-// Other locales already use English help; keep that fallback in sync.
-for (const language of ['ja', 'es', 'fr']) I18N[language].helpBody = I18N.en.helpBody;
+<p>备注自动保存到当前照片。<b>导出</b>可保存计数 CSV，或含标注图和状态文件的 ZIP。网页版会将照片上传到临时服务器会话，离开前请导出。</p>
+<section class="review-help"><h3>核验队列</h3><p>校正已有标记，在<b>准确率核验</b>中主动勾选确认，再点击<b>保存菌落核验</b>。仅浏览不算确认，后续编辑可能使确认失效；培养基边界仅在亲自检查后确认。</p></section>`,
+  ja: `<h3>取り込みとモード</h3>
+<p><b>画像を追加</b>を使うか、画像やフォルダをサイドバーにドロップします。ローカル版では<b>パスを取り込む</b>も使えます。取り込むだけでは認識は始まりません。<b>Ultra</b>は改良アルゴリズムと SAM を組み合わせ、計算量が増えます。<b>Lite</b>は軽量なアルゴリズム、<b>カスタム</b>はその設定を調整するモードです。Web 版は Lite とカスタムに対応します。説明は ⓘ で確認できます。</p>
+<h3>画像を認識する</h3>
+<p>Ultra・Lite の<b>すべて認識</b>は未認識の画像を順番に処理し、既存の結果や手作業を保持します。処理中はページを開いたままにしてください。<b>この画像の完了後に停止</b>で、現在の画像が終わると停止します。</p>
+<p><b>現在の画像を認識</b>は選択中の画像を処理します。Ultra は新規の結果を直接保存し、既存の結果がある場合はプレビューを表示します。<b>結果を採用</b>で保存済みマークを置き換えます。採用は元に戻せます。<b>プレビューを取消</b>なら既存の結果を保持します。Lite は直接再計数し、手動編集を置き換える前に確認します。Lite で<b>詳細確認 · SAM</b>が利用できる場合も、SAM のプレビューから採用か取消を選べます。</p>
+<h3>カスタム調整</h3>
+<p>スライダーを動かすか、数値をクリックして入力します。<b>前景のライブプレビュー</b>の明るいミント色は選択画素であり、最終的なコロニーではありません。<b>適用</b>はこのページで使う設定を保持してパネルを閉じるだけで、認識は実行しません。その後、<b>現在の画像を認識</b>または<b>すべて認識</b>を選びます。<b>調整</b>で再び開けます。未適用の変更は使われません。調整対象はアルゴリズムで、SAM ではありません。カスタムの一括処理は機械結果のみの画像を再計数しますが、手動編集、メモ、検証記録、手動モードの画像は除外します。現在の画像で保護された結果を置き換える際は確認します。</p>
+<h3>マークを確認する</h3>
+<p>機械マークはくすんだローズ、手動マークはくすんだブルーの実線です。円は中心位置を示し、正確な輪郭ではありません。クリックで追加、右クリックで削除、素早いドラッグの枠で複数削除できます。長押ししてドラッグで移動、ホイールで拡大縮小、<b>F</b>で全体表示。<b>← / →</b>で画像を切り替え、<b>Cmd/Ctrl Z</b>で編集を戻します。入力欄・スライダー・選択欄にフォーカスがある間は方向キーでその項目を操作します。<b>手動マーク</b>の大きさは新規マークだけに反映されます。必要なら<b>その他 → 培地の境界を調整</b>を使います。</p>
+<h3>状態と削除</h3>
+<p>白抜きの点は未認識、薄い灰色は機械結果あり、濃い灰色は閲覧・編集済みです。閲覧は精度検証ではありません。<b>一括削除</b>で画像を選び、<b>すべて選択</b>で全選択・全解除を切り替えます。<b>選択した画像を削除</b>で確認すると、作業領域の画像と計数記録が削除されます。元ファイルは残ります。削除は元に戻せません。</p>
+<h3>メモと書き出し</h3>
+<p>メモは現在の画像に自動保存されます。<b>書き出し</b>から計数 CSV、または注釈付き画像と状態ファイルを含む ZIP を保存できます。Web 版は画像を一時的なサーバーセッションへアップロードします。離れる前に書き出してください。</p>
+<section class="review-help"><h3>確認キュー</h3><p>既存マークを修正し、<b>精度検証</b>で明示的に確認してから<b>コロニーの検証を保存</b>を選びます。閲覧だけでは確認になりません。後の編集で確認が無効になる場合があります。培地の境界は実際に確認した場合のみ確定してください。</p></section>`,
+  es: `<h3>Importar y elegir un modo</h3>
+<p>Usa <b>Añadir imágenes</b> o arrastra fotos o carpetas a la barra lateral. En local también puedes usar <b>Importar ruta</b>. Importar no inicia el reconocimiento. <b>Ultra</b> combina el algoritmo mejorado con SAM y requiere más cálculo; <b>Lite</b> usa el algoritmo ligero. <b>Personalizado</b> permite ajustar sus parámetros. La versión web ofrece Lite y Personalizado. Consulta ⓘ para más detalles.</p>
+<h3>Reconocer fotos</h3>
+<p>En Ultra o Lite, <b>Reconocer todas</b> procesa las fotos sin reconocer en orden y conserva los resultados y el trabajo manual. Mantén la página abierta; <b>Detener tras esta imagen</b> detiene el proceso al terminar la foto actual.</p>
+<p><b>Reconocer actual</b> procesa la foto seleccionada. Ultra guarda directamente los resultados nuevos; si ya existen resultados, muestra una vista previa. <b>Adoptar resultado</b> reemplaza las marcas guardadas y permite deshacer; <b>Cancelar vista previa</b> las conserva. Lite recalcula directamente y pide confirmación antes de reemplazar ediciones manuales. En Lite, <b>Revisión detallada · SAM</b>, cuando está disponible, ofrece una vista previa de SAM que puedes adoptar o cancelar.</p>
+<h3>Ajustes personalizados</h3>
+<p>Mueve los deslizadores o pulsa un número para escribirlo. El verde menta de <b>Vista previa del primer plano</b> muestra píxeles seleccionados, no colonias finales. <b>Aplicar</b> conserva los ajustes durante esta sesión de página y cierra el panel; no reconoce fotos. Después elige <b>Reconocer actual</b> o <b>Reconocer todas</b>. <b>Ajustar</b> abre el panel; los cambios sin aplicar no se usan. Los parámetros ajustan el algoritmo, no SAM. El lote personalizado recalcula resultados solo de máquina, pero omite ediciones manuales, notas, registros de verificación y modo manual. El recálculo individual pide confirmación antes de reemplazar trabajo protegido.</p>
+<h3>Revisar marcas</h3>
+<p>Las marcas de máquina son rosa apagado; las manuales, azul apagado, ambas continuas. Los círculos indican centros, no contornos exactos. Clic para añadir, clic derecho para borrar; arrastra rápidamente un recuadro para borrar varias. Mantén pulsado y arrastra para mover; rueda para ampliar; <b>F</b> para encajar. <b>← / →</b> cambia de foto; <b>Cmd/Ctrl Z</b> deshace. Las flechas actúan sobre el campo, deslizador o selector que tenga el foco. <b>Marcas manuales</b> cambia solo el tamaño de marcas nuevas. Usa <b>Más → Ajustar límite del medio</b> cuando sea necesario.</p>
+<h3>Estado y eliminación</h3>
+<p>Punto vacío: sin reconocer. Gris claro: resultado de máquina. Gris oscuro: vista o editada, sin implicar verificación. <b>Eliminar en lote</b> permite elegir fotos; <b>Seleccionar todas</b> alterna entre todas y ninguna. <b>Eliminar seleccionadas</b> pide confirmación y elimina las fotos y registros del espacio de trabajo. Los originales permanecen; no se puede deshacer.</p>
+<h3>Notas y exportación</h3>
+<p>Las notas se guardan automáticamente para la foto actual. <b>Exportar</b> guarda recuentos CSV o un ZIP con imágenes anotadas y archivos de estado. La versión web sube las fotos a una sesión temporal del servidor; exporta antes de salir.</p>
+<section class="review-help"><h3>Colas de revisión</h3><p>Corrige las marcas, confirma expresamente en <b>Verificación de precisión</b> y pulsa <b>Guardar verificación de colonias</b>. Mirar una foto no la verifica. Las ediciones posteriores pueden invalidar la confirmación. Confirma el límite del medio solo si lo has revisado.</p></section>`,
+  fr: `<h3>Importer et choisir un mode</h3>
+<p>Utilisez <b>Ajouter des images</b> ou déposez des photos ou dossiers dans la barre latérale. En local, vous pouvez aussi <b>Importer le chemin</b>. L’importation ne lance pas la reconnaissance. <b>Ultra</b> associe l’algorithme amélioré à SAM et demande plus de calcul ; <b>Lite</b> utilise l’algorithme léger. <b>Personnalisé</b> permet d’en régler les paramètres. La version web propose Lite et Personnalisé. Consultez ⓘ pour les détails.</p>
+<h3>Reconnaître les photos</h3>
+<p>En Ultra ou Lite, <b>Tout reconnaître</b> traite les photos non reconnues une à une, en conservant les résultats et le travail manuel. Gardez la page ouverte ; <b>Arrêter après cette image</b> arrête le traitement après la photo en cours.</p>
+<p><b>Reconnaître l’image actuelle</b> traite la photo sélectionnée. Ultra enregistre directement les nouveaux résultats ; s’il existe déjà un résultat, un aperçu s’affiche. <b>Adopter le résultat</b> remplace les marques enregistrées et reste réversible ; <b>Annuler l’aperçu</b> les conserve. Lite recompte directement et demande confirmation avant de remplacer des modifications manuelles. En Lite, <b>Vérification détaillée · SAM</b>, si disponible, propose un aperçu SAM à adopter ou à annuler.</p>
+<h3>Réglages personnalisés</h3>
+<p>Déplacez les curseurs ou cliquez sur un nombre pour le saisir. Le vert menthe de l’<b>Aperçu du premier plan</b> indique les pixels sélectionnés, pas les colonies finales. <b>Appliquer</b> conserve les réglages pour cette session de page et ferme le panneau, sans lancer la reconnaissance. Choisissez ensuite <b>Reconnaître l’image actuelle</b> ou <b>Tout reconnaître</b>. <b>Ajuster</b> rouvre le panneau ; les changements non appliqués ne sont pas utilisés. Ces réglages concernent l’algorithme, pas SAM. Le traitement personnalisé recalcule les résultats uniquement automatiques, mais ignore les modifications manuelles, notes, validations et images en mode manuel. Le recomptage individuel demande confirmation avant de remplacer un travail protégé.</p>
+<h3>Vérifier les marques</h3>
+<p>Les marques automatiques sont rose grisé, les manuelles bleu grisé, toutes en trait plein. Les cercles indiquent les centres, pas les contours exacts. Cliquez pour ajouter, faites un clic droit pour supprimer, ou tracez rapidement un rectangle pour en supprimer plusieurs. Maintenez puis glissez pour déplacer ; molette pour zoomer ; <b>F</b> pour cadrer. <b>← / →</b> change de photo ; <b>Cmd/Ctrl Z</b> annule une modification. Les flèches agissent sur le champ, curseur ou sélecteur qui a le focus. <b>Marques manuelles</b> ne règle que la taille des nouvelles marques. Au besoin, utilisez <b>Plus → Ajuster la limite du milieu</b>.</p>
+<h3>État et suppression</h3>
+<p>Point vide : non reconnue. Gris clair : résultat automatique. Gris foncé : consultée ou modifiée, sans validation de précision. <b>Supprimer par lot</b> permet de choisir les photos ; <b>Tout sélectionner</b> bascule entre toutes et aucune. <b>Supprimer la sélection</b> demande confirmation, puis retire les photos et leurs relevés de l’espace de travail. Les originaux restent intacts ; la suppression est irréversible.</p>
+<h3>Notes et export</h3>
+<p>Les notes sont enregistrées automatiquement pour la photo actuelle. <b>Exporter</b> produit les comptages CSV ou un ZIP avec images annotées et fichiers d’état. La version web envoie les photos à une session temporaire sur le serveur ; exportez avant de quitter.</p>
+<section class="review-help"><h3>Files de vérification</h3><p>Corrigez les marques, confirmez explicitement dans <b>Vérification de précision</b>, puis choisissez <b>Enregistrer la vérification des colonies</b>. Consulter ne vaut pas confirmer. Des modifications ultérieures peuvent invalider la confirmation. Ne confirmez la limite du milieu que si vous l’avez vérifiée.</p></section>`,
+};
+for (const [language, content] of Object.entries(HELP_CONTENT)) {
+  const authors = {en: 'Authors', 'zh-CN': '作者', ja: '著者', es: 'Autores', fr: 'Auteurs'}[language];
+  I18N[language].helpBody = content + AUTHORS_FOOTER.replace('<b>Authors</b>', `<b>${authors}</b>`);
+}
 
 const LANG_NAMES = {
   en: 'English',
@@ -837,4 +884,184 @@ Object.assign(I18N['zh-CN'], {
   sourceViewRequired: '默认识别支持正面与空白皿。请在「更多」中指定照片类型。', sourceViewSaved: '已保存照片类型。',
   modelUnavailable: '默认识别暂不可用。', fusionV2Warning: '请检查识别标记后采用。', fusionV2SavedSource: '融合识别', fusionV2Method: '融合识别',
 });
+  Object.assign(I18N.en, {
+    recognizeAll: 'Recognize all', defaultBatchHint: 'Processes unrecognized photos. Existing work is kept.',
+    batchRemaining: 'not started', batchUncertain: 'Save not confirmed — reload this photo before editing',
+    batchAlreadyCounted: 'Already recognized', batchProtected: 'Existing edits or reference kept',
+    batchStopping: 'Stopping after the current photo is saved…',
+    defaultBatchCustomOnly: 'Use Recognize all to process unrecognized photos.',
+  });
+  Object.assign(I18N['zh-CN'], {
+    recognizeAll: '识别全部', defaultBatchHint: '识别尚未处理的照片，保留已有结果和修改。',
+    batchRemaining: '未开始', batchUncertain: '保存结果待核对，请重新打开此照片后再编辑',
+    batchAlreadyCounted: '已有识别结果', batchProtected: '保留已有修改或核验记录',
+    batchStopping: '当前照片保存后停止…',
+    defaultBatchCustomOnly: '点击「识别全部」处理未识别照片。',
+  });
+  Object.assign(I18N.en, {
+    bulkDeleteMode: 'Batch delete', finishSelection: 'Exit selection',
+    selectAllImages: 'Select all', selectNoImages: 'Clear', deleteSelectedImages: 'Delete selected',
+    imagesSelected: '{count} selected',
+    bulkDeleteConfirm: 'Remove {count} selected photos and their counting records from this list? Your original photos are not deleted. This cannot be undone.',
+    bulkDeleting: 'Removing {current}/{total}…', bulkDeleteDone: 'Removed {count} photos',
+    bulkDeleteFailed: '{count} removals not confirmed', bulkRefreshFailed: 'Please refresh to check the list',
+  });
+  Object.assign(I18N['zh-CN'], {
+    bulkDeleteMode: '批量删除', finishSelection: '退出选择',
+    selectAllImages: '全选', selectNoImages: '清空选择', deleteSelectedImages: '删除所选',
+    imagesSelected: '已选 {count} 张',
+    bulkDeleteConfirm: '从列表删除选中的 {count} 张照片及其计数记录？原始照片不会删除，此操作无法撤销。',
+    bulkDeleting: '正在移除 {current}/{total}…', bulkDeleteDone: '已移除 {count} 张照片',
+    bulkDeleteFailed: '{count} 张未确认移除', bulkRefreshFailed: '请刷新后核对列表',
+  });
+Object.assign(I18N.en, {
+  profileClassical: 'Lite',
+  defaultRoute: 'Default: algorithm + SAM', defaultRouteHint: 'Uses the fixed algorithm + SAM recipe, without DINO.',
+  classicalRoute: 'Lite', classicalRouteHint: 'Uses the improved algorithm without SAM. Lower resource use; complex colonies may need more manual correction.',
+  classicalBatchHint: 'Algorithm only for unrecognized photos. Existing work is kept.',
+  customRoute: 'Custom: enhanced algorithm', customRouteHint: 'Uses the retained, adjustable traditional algorithm.',
+  recognitionSourceUnavailable: 'Reload the photo before recognizing it.',
+  samPreview: 'SAM preview', modelCurrent: 'Currently saved', currentSavedSource: 'Saved result · ', samSavedSource: 'Algorithm + SAM', enhancedSavedSource: 'Enhanced algorithm',
+  refineCurrent: 'Detailed check · SAM', refineCurrentHint: 'Runs algorithm + SAM for this photo. No DINO. Preview first; apply only if useful.',
+  defaultBatchHint: 'Algorithm + SAM for unrecognized photos. Existing work is kept.',
+  fusionV2SavedSource: 'Algorithm + SAM + DINO', sourceViewRequired: 'Recognition supports front and blank plates. Set the photo type under More.',
+  modelUnavailable: 'This recognition method is unavailable.',
+});
+Object.assign(I18N['zh-CN'], {
+  profileClassical: 'Lite',
+  defaultRoute: '默认：算法 + SAM', defaultRouteHint: '使用固定的算法 + SAM 方案，不运行 DINO。',
+  classicalRoute: 'Lite', classicalRouteHint: '使用已改进的传统算法，不加载 SAM。资源占用较低，复杂菌落可能需要更多人工校正。',
+  classicalBatchHint: '用纯算法识别未处理照片，保留已有结果。',
+  customRoute: '自定义：增强算法', customRouteHint: '保留已改进的传统算法，可调参数。',
+  recognitionSourceUnavailable: '请重新打开照片后识别。',
+  samPreview: 'SAM 预览', modelCurrent: '当前已保存', currentSavedSource: '当前结果 · ', samSavedSource: '算法 + SAM', enhancedSavedSource: '增强算法',
+  refineCurrent: '精细补检 · SAM', refineCurrentHint: '当前照片使用算法 + SAM，不运行 DINO。先预览，再决定是否采用。',
+  defaultBatchHint: '用算法 + SAM 识别未处理照片，保留已有结果。',
+  fusionV2SavedSource: '算法 + SAM + DINO', sourceViewRequired: '识别支持正面与空白皿，请在「更多」中指定照片类型。',
+  modelUnavailable: '此识别方法暂不可用。',
+});
+Object.assign(I18N.en, {
+  openAdjustments: 'Adjust', collapseAdjustments: 'Close adjustments', adjustmentsPending: 'Adjust · unapplied',
+  customSettingsApplied: 'Settings applied. Recognize the current photo or all photos.',
+  customDraftHint: 'Apply to keep these settings and close the panel. Then choose which photos to recognize.',
+  previewExplanation: 'Bright mint shows selected pixels, not final colonies.',
+  customBatchScopeHint: 'Uses applied settings. Batch recognition keeps manual edits, notes and verification records.',
+  customBatchProtectedHint: 'Manual edits, notes and verification records are kept in batch recognition.',
+});
+Object.assign(I18N['zh-CN'], {
+  openAdjustments: '调整', collapseAdjustments: '收起调整', adjustmentsPending: '调整 · 待应用',
+  customSettingsApplied: '设置已应用，可识别当前或全部照片。',
+  customDraftHint: '应用后收起，再选择要识别的照片。参数跨图保留。',
+  previewExplanation: '亮青绿为选中像素，并非最终菌落。',
+  customBatchScopeHint: '使用已应用参数，保留人工修改、备注及核验记录。',
+  customBatchProtectedHint: '批量保留人工修改、备注及核验记录。',
+});
+Object.assign(I18N.en, {
+  modeInfo: 'About this mode',
+  modeInfoUltra: 'Algorithm + SAM for detailed recognition. Uses more time and memory.',
+  modeInfoLite: 'The improved algorithm without SAM. Faster and lighter; complex colonies may need more manual correction.',
+  modeInfoCustom: 'Adjust the algorithm parameters, apply them, then recognize the current photo or all photos. These controls do not tune SAM.',
+});
+Object.assign(I18N['zh-CN'], {
+  modeInfo: '模式说明',
+  modeInfoUltra: '算法 + SAM，适合细致识别。耗时和内存占用相对较高。',
+  modeInfoLite: '使用已改进的传统算法，不加载 SAM。速度更快、占用更低；复杂菌落可能需要更多人工校正。',
+  modeInfoCustom: '调整算法参数，应用后识别当前或全部照片。这些参数不调整 SAM。',
+});
+// Labels used by the localized help must match the actions users see.
+Object.assign(I18N.en, {
+  paramsChanged: 'Settings changed. Apply them, then choose which photos to recognize.',
+  defaultRouteHint: 'Uses the fixed algorithm + SAM settings.',
+  refineCurrentHint: 'Preview algorithm + SAM on this photo, then decide whether to adopt the result.',
+});
+Object.assign(I18N['zh-CN'], {
+  paramsChanged: '参数已修改，应用后再选择要识别的照片。',
+  defaultRouteHint: '使用固定的算法 + SAM 设置。',
+  refineCurrentHint: '预览当前照片的算法 + SAM 结果，再决定是否采用。',
+});
+Object.assign(I18N.ja, {
+  addImages: '画像を追加', dropHint: '画像やフォルダをドロップして追加', dropSubHint: '元の画像は変更されません。',
+  importPath: 'パスから取り込む', pasteHint: 'フォルダまたは画像のパス',
+  recognitionProfile: '認識設定', profileDefault: 'Ultra', profileClassical: 'Lite', profileCustom: 'カスタム',
+  recognizeCurrent: '現在の画像を認識', recognizeAll: 'すべて認識', countAll: 'すべて認識', countOne: '再認識', customRunAll: 'すべて認識',
+  stopCounting: 'この画像の完了後に停止',
+  modeInfo: 'モードの説明',
+  modeInfoUltra: 'アルゴリズムと SAM を組み合わせた認識です。時間とメモリをより多く使います。',
+  modeInfoLite: 'SAM を使わず改良アルゴリズムで処理します。軽量で高速ですが、複雑なコロニーは手動修正が増える場合があります。',
+  modeInfoCustom: 'アルゴリズムの設定を調整して適用し、現在の画像または全画像を認識します。SAM の設定は変わりません。',
+  modelApply: '結果を採用', modelDiscard: 'プレビューを取消', refineCurrent: '詳細確認 · SAM',
+  refineCurrentHint: '現在の画像の SAM 結果をプレビューし、採用するか選びます。',
+  applyParams: '適用', resetDefaults: 'リセット', customSettings: '調整', openAdjustments: '調整', collapseAdjustments: '調整を閉じる', adjustmentsPending: '調整 · 未適用',
+  customSettingsApplied: '設定を適用しました。現在の画像または全画像を認識できます。',
+  customDraftHint: '適用すると設定を保持してパネルを閉じます。その後、認識する画像を選びます。',
+  customBatchScopeHint: '適用済みの設定を使用し、手動編集・メモ・検証記録を保持します。',
+  customBatchProtectedHint: '一括処理では手動編集・メモ・検証記録を保持します。',
+  paramsChanged: '設定を変更しました。適用してから認識する画像を選んでください。',
+  livePreview: '前景のライブプレビュー', previewReady: '明るいミント色 = 選択画素', previewExplanation: '明るいミント色は選択画素で、最終的なコロニーではありません。',
+  manualMarkSettings: '手動マーク', manualMarkRadius: '半径（px）', manualMarkHint: '新しく追加するマークだけに反映されます。',
+  legendAuto: '機械 · ローズ', legendManual: '手動 · ブルー',
+  flagUnprocessed: '未認識', flagCounted: '機械認識済み', flagViewed: '閲覧・編集済み · 精度検証とは別',
+  imageActions: 'その他', adjustCrop: '培地の境界を調整',
+  bulkDeleteMode: '一括削除', finishSelection: '選択を終了', selectAllImages: 'すべて選択', selectNoImages: '選択を解除', deleteSelectedImages: '選択した画像を削除', imagesSelected: '{count} 枚を選択',
+  bulkDeleteConfirm: '選択した {count} 枚の画像と計数記録を一覧から削除しますか？元の画像は削除されません。この操作は元に戻せません。',
+  exportMenu: '書き出し', referenceTitle: '精度検証', referenceSave: 'コロニーの検証を保存',
+  sidebarPhotos: '画像', sidebarAdjustments: '調整', sidebarTabs: '作業領域',
+});
+Object.assign(I18N.es, {
+  addImages: 'Añadir imágenes', dropHint: 'Arrastra fotos o carpetas para añadirlas', dropSubHint: 'Las fotos originales no se modifican.',
+  importPath: 'Importar desde una ruta', pasteHint: 'Ruta de carpeta o imagen',
+  recognitionProfile: 'Ajustes de reconocimiento', profileDefault: 'Ultra', profileClassical: 'Lite', profileCustom: 'Personalizado',
+  recognizeCurrent: 'Reconocer actual', recognizeAll: 'Reconocer todas', countAll: 'Reconocer todas', countOne: 'Reconocer de nuevo', customRunAll: 'Reconocer todas',
+  stopCounting: 'Detener tras esta imagen',
+  modeInfo: 'Acerca de este modo',
+  modeInfoUltra: 'Reconocimiento con el algoritmo y SAM. Requiere más tiempo y memoria.',
+  modeInfoLite: 'Usa el algoritmo mejorado sin SAM. Es más rápido y ligero; las colonias complejas pueden necesitar más correcciones manuales.',
+  modeInfoCustom: 'Ajusta y aplica los parámetros del algoritmo; después reconoce la foto actual o todas. Estos controles no ajustan SAM.',
+  modelApply: 'Adoptar resultado', modelDiscard: 'Cancelar vista previa', refineCurrent: 'Revisión detallada · SAM',
+  refineCurrentHint: 'Previsualiza el resultado de SAM para esta foto y decide si adoptarlo.',
+  applyParams: 'Aplicar', resetDefaults: 'Restablecer', customSettings: 'Ajustes', openAdjustments: 'Ajustar', collapseAdjustments: 'Cerrar ajustes', adjustmentsPending: 'Ajustar · sin aplicar',
+  customSettingsApplied: 'Ajustes aplicados. Reconoce la foto actual o todas.',
+  customDraftHint: 'Aplica para conservar estos ajustes y cerrar el panel. Después elige las fotos que quieras reconocer.',
+  customBatchScopeHint: 'Usa los ajustes aplicados y conserva ediciones manuales, notas y verificaciones.',
+  customBatchProtectedHint: 'El lote conserva ediciones manuales, notas y verificaciones.',
+  paramsChanged: 'Ajustes modificados. Aplícalos y elige las fotos que quieras reconocer.',
+  livePreview: 'Vista previa del primer plano', previewReady: 'Verde menta = píxeles seleccionados', previewExplanation: 'El verde menta muestra píxeles seleccionados, no colonias finales.',
+  manualMarkSettings: 'Marcas manuales', manualMarkRadius: 'Radio (px)', manualMarkHint: 'Solo afecta a las marcas manuales nuevas.',
+  legendAuto: 'Máquina · rosa', legendManual: 'Manual · azul',
+  flagUnprocessed: 'Sin reconocer', flagCounted: 'Reconocimiento automático completado', flagViewed: 'Vista o editada · no es verificación',
+  imageActions: 'Más', adjustCrop: 'Ajustar límite del medio',
+  bulkDeleteMode: 'Eliminar en lote', finishSelection: 'Salir de la selección', selectAllImages: 'Seleccionar todas', selectNoImages: 'Quitar selección', deleteSelectedImages: 'Eliminar seleccionadas', imagesSelected: '{count} seleccionadas',
+  bulkDeleteConfirm: '¿Eliminar de la lista las {count} fotos seleccionadas y sus registros? Los originales no se borran. No se puede deshacer.',
+  exportMenu: 'Exportar', referenceTitle: 'Verificación de precisión', referenceSave: 'Guardar verificación de colonias',
+  sidebarPhotos: 'Fotos', sidebarAdjustments: 'Ajustes', sidebarTabs: 'Espacio de trabajo',
+});
+Object.assign(I18N.fr, {
+  addImages: 'Ajouter des images', dropHint: 'Déposez des photos ou dossiers pour les ajouter', dropSubHint: 'Les photos originales restent inchangées.',
+  importPath: 'Importer depuis un chemin', pasteHint: 'Chemin du dossier ou de l’image',
+  recognitionProfile: 'Réglages de reconnaissance', profileDefault: 'Ultra', profileClassical: 'Lite', profileCustom: 'Personnalisé',
+  recognizeCurrent: 'Reconnaître l’image actuelle', recognizeAll: 'Tout reconnaître', countAll: 'Tout reconnaître', countOne: 'Reconnaître à nouveau', customRunAll: 'Tout reconnaître',
+  stopCounting: 'Arrêter après cette image',
+  modeInfo: 'À propos de ce mode',
+  modeInfoUltra: 'Reconnaissance avec l’algorithme et SAM. Demande plus de temps et de mémoire.',
+  modeInfoLite: 'Utilise l’algorithme amélioré sans SAM. Plus rapide et léger ; les colonies complexes peuvent demander davantage de corrections manuelles.',
+  modeInfoCustom: 'Réglez et appliquez les paramètres de l’algorithme, puis reconnaissez la photo actuelle ou toutes les photos. Ces contrôles ne règlent pas SAM.',
+  modelApply: 'Adopter le résultat', modelDiscard: 'Annuler l’aperçu', refineCurrent: 'Vérification détaillée · SAM',
+  refineCurrentHint: 'Prévisualisez le résultat SAM pour cette photo, puis décidez de l’adopter ou non.',
+  applyParams: 'Appliquer', resetDefaults: 'Réinitialiser', customSettings: 'Réglages', openAdjustments: 'Ajuster', collapseAdjustments: 'Fermer les réglages', adjustmentsPending: 'Ajuster · non appliqué',
+  customSettingsApplied: 'Réglages appliqués. Vous pouvez reconnaître la photo actuelle ou toutes les photos.',
+  customDraftHint: 'Appliquez pour conserver ces réglages et fermer le panneau. Choisissez ensuite les photos à reconnaître.',
+  customBatchScopeHint: 'Utilise les réglages appliqués et conserve modifications manuelles, notes et validations.',
+  customBatchProtectedHint: 'Le traitement par lot conserve modifications manuelles, notes et validations.',
+  paramsChanged: 'Réglages modifiés. Appliquez-les, puis choisissez les photos à reconnaître.',
+  livePreview: 'Aperçu du premier plan', previewReady: 'Vert menthe = pixels sélectionnés', previewExplanation: 'Le vert menthe indique les pixels sélectionnés, pas les colonies finales.',
+  manualMarkSettings: 'Marques manuelles', manualMarkRadius: 'Rayon (px)', manualMarkHint: 'Concerne uniquement les nouvelles marques manuelles.',
+  legendAuto: 'Machine · rose', legendManual: 'Manuel · bleu',
+  flagUnprocessed: 'Non reconnue', flagCounted: 'Reconnaissance automatique terminée', flagViewed: 'Consultée ou modifiée · sans validation',
+  imageActions: 'Plus', adjustCrop: 'Ajuster la limite du milieu',
+  bulkDeleteMode: 'Supprimer par lot', finishSelection: 'Quitter la sélection', selectAllImages: 'Tout sélectionner', selectNoImages: 'Désélectionner', deleteSelectedImages: 'Supprimer la sélection', imagesSelected: '{count} sélectionnées',
+  bulkDeleteConfirm: 'Retirer de la liste les {count} photos sélectionnées et leurs relevés ? Les originaux ne sont pas supprimés. Cette action est irréversible.',
+  exportMenu: 'Exporter', referenceTitle: 'Vérification de précision', referenceSave: 'Enregistrer la vérification des colonies',
+  sidebarPhotos: 'Photos', sidebarAdjustments: 'Réglages', sidebarTabs: 'Espace de travail',
+});
+
 })();

@@ -9,9 +9,13 @@ import hashlib
 import io
 import json
 import math
+import os
 from pathlib import Path
+import re
 import resource
+import select
 import sys
+import time
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -62,11 +66,12 @@ def cv_seeds(im, plate, params):
     # Numeric body of round7 predict.cv_seeds, with exactly the same dependencies.
     import numpy as np
     from scipy import ndimage as ndi
-    from wecfu.experiments.segmentation import _candidate_mask, _component_watershed_split
+    from wecfu.experiments.segmentation import _candidate_mask, _component_watershed_split_with_distance
     roi = plate.mask(im.shape[:2], shrink=params.plate_inset)
     bw = _candidate_mask(im, roi, params, 5, 9)
-    labels, _ = _component_watershed_split(bw, params)
-    distance = ndi.distance_transform_edt(bw > 0)
+    labels, _, distance = _component_watershed_split_with_distance(bw, params)
+    if distance is None:
+        return []
     minimum = params.min_area_frac * math.pi * (plate.r * params.plate_inset)**2
     seeds = []
     for label, bounds in enumerate(ndi.find_objects(labels), 1):
@@ -101,7 +106,7 @@ def prepare(folder, request):
     save(folder, "prepared.json", dict(width=width, height=height, seeds=seeds))
 
 
-def infer(folder, request):
+def infer(folder, request, *, model_cache=None):
     from wecfu.runtime_paths import check_versions, verify_sam_source
     check_versions()
     verify_sam_source()
@@ -145,20 +150,38 @@ def infer(folder, request):
             memory_check()
             return result
 
-    model = build_sam.build_sam2("configs/sam2.1/sam2.1_hiera_t.yaml", str(CHECKPOINT),
-                                 device=SAM_DEVICE, apply_postprocessing=False)
-    model.eval()
+    # Only the optional persistent inference interpreter owns this cache. It
+    # contains model weights and RNG state, never images, grids or predictions.
+    if model_cache is not None and model_cache:
+        model = model_cache["model"]
+        torch.set_rng_state(model_cache["cpu_rng"])
+        if SAM_DEVICE == "mps":
+            torch.mps.set_rng_state(model_cache["device_rng"])
+    else:
+        model = build_sam.build_sam2("configs/sam2.1/sam2.1_hiera_t.yaml", str(CHECKPOINT),
+                                     device=SAM_DEVICE, apply_postprocessing=False)
+        model.eval()
+        if model_cache is not None:
+            model_cache.update(model=model, cpu_rng=torch.get_rng_state().clone())
+            if SAM_DEVICE == "mps":
+                model_cache["device_rng"] = torch.mps.get_rng_state().clone()
     if next(model.parameters()).dtype != torch.float32:
         raise RuntimeError("SAM2 model must remain float32")
     points = np.array([[s["x"] / prepared["width"], s["y"] / prepared["height"]]
                        for s in prepared["seeds"]], dtype=np.float32).reshape(-1, 2)
     generator = BoundedGenerator(model, **MODEL_SETTINGS, point_grids=[points])
-    memory_check()
-    with torch.inference_mode():
-        annotations = generator.generate(image)
-    if SAM_DEVICE == "mps": torch.mps.synchronize()
-    memory_check()
-    save(folder, "annotations.json", annotations)
+    try:
+        memory_check()
+        with torch.inference_mode():
+            annotations = generator.generate(image)
+        if SAM_DEVICE == "mps": torch.mps.synchronize()
+        memory_check()
+        save(folder, "annotations.json", annotations)
+    finally:
+        # A new generator/predictor is constructed for every image. Explicitly
+        # release its embeddings even if generation or serialization failed.
+        if model_cache is not None:
+            generator.predictor.reset_predictor()
 
 
 def postprocess(annotations, plate, height, width):
@@ -207,11 +230,114 @@ def finish(folder, request):
     save(folder, "result.json", dict(**request, status="ok", raw_count=len(annotations), detections=detections))
 
 
-if __name__ == "__main__":
-    sys.addaudithook(no_network)
-    folder = Path(sys.argv[1]).resolve()
+def validated_request(folder):
     request = load(folder, "request.json")
     if (request.get("engine") != ENGINE or request.get("recipe_id") != RECIPE_ID
             or request.get("model_sha256") != MODEL_SHA256):
         raise RuntimeError("Worker recipe mismatch")
-    {"prepare": prepare, "infer": infer, "finish": finish}[sys.argv[2]](folder, request)
+    return request
+
+
+PROTOCOL_MAX_BYTES = 4096
+# The parent reaps the whole idle pair after 90 seconds. Allow one other
+# interpreter's full 120-second request before this child's own idle backstop.
+PROTOCOL_IDLE_SECONDS = 210.0
+PROTOCOL_MAX_REQUESTS = 32
+
+
+class ProtocolReader:
+    """Bounded binary reads; buffered lines never wait for another pipe event."""
+
+    def __init__(self, descriptor):
+        self.descriptor = descriptor
+        self.pending = b""
+
+    def read(self, idle_seconds):
+        deadline = time.monotonic() + idle_seconds
+        while True:
+            end = self.pending.find(b"\n")
+            if end >= 0:
+                line, self.pending = self.pending[:end], self.pending[end + 1:]
+                if len(line) + 1 > PROTOCOL_MAX_BYTES:
+                    raise RuntimeError("Worker command exceeds protocol budget")
+                return line
+            if len(self.pending) >= PROTOCOL_MAX_BYTES:
+                raise RuntimeError("Worker command exceeds protocol budget")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self.descriptor], [], [], remaining)[0]:
+                return None
+            chunk = os.read(self.descriptor, PROTOCOL_MAX_BYTES + 1 - len(self.pending))
+            if not chunk:
+                if self.pending:
+                    raise RuntimeError("Incomplete worker command")
+                return None
+            self.pending += chunk
+
+
+def protocol_command(raw, mode):
+    command = json.loads(raw)
+    if not isinstance(command, dict) or set(command) != {"id", "folder", "stage"}:
+        raise RuntimeError("Invalid worker command fields")
+    token = command["id"]
+    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", token):
+        raise RuntimeError("Invalid worker command id")
+    if command["stage"] not in ({"infer"} if mode == "infer" else {"prepare", "finish"}):
+        raise RuntimeError("Worker stage does not match interpreter mode")
+    if not isinstance(command["folder"], str) or not Path(command["folder"]).is_absolute():
+        raise RuntimeError("Worker scratch path must be absolute")
+    folder = Path(command["folder"]).resolve(strict=True)
+    if not folder.is_dir():
+        raise RuntimeError("Worker scratch path must be a directory")
+    return token, folder, command["stage"]
+
+
+def serve(mode, *, idle_seconds=PROTOCOL_IDLE_SECONDS, max_requests=PROTOCOL_MAX_REQUESTS):
+    if mode not in {"infer", "cv"}:
+        raise RuntimeError("Unknown persistent worker mode")
+    reader = ProtocolReader(sys.stdin.fileno())
+    model_cache = {} if mode == "infer" else None
+    # Preserve a dedicated protocol fd, then route Python and native-library
+    # stdout to stderr. Incidental output cannot corrupt the controller reply.
+    sys.stdout.flush()
+    with os.fdopen(os.dup(sys.stdout.fileno()), "wb", buffering=0) as output:
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+        for _ in range(max_requests):
+            token = None
+            try:
+                raw = reader.read(idle_seconds)
+                if raw is None:
+                    return
+                token, folder, stage = protocol_command(raw, mode)
+                request = validated_request(folder)
+                if mode == "cv":
+                    if "torch" in sys.modules:
+                        raise RuntimeError("The isolated CV process must not import Torch")
+                    {"prepare": prepare, "finish": finish}[stage](folder, request)
+                    if "torch" in sys.modules:
+                        raise RuntimeError("The isolated CV process must not import Torch")
+                else:
+                    if "cv2" in sys.modules:
+                        raise RuntimeError("The isolated model process must not import OpenCV")
+                    infer(folder, request, model_cache=model_cache)
+                    if "cv2" in sys.modules:
+                        raise RuntimeError("The isolated model process must not import OpenCV")
+                reply = dict(id=token, ok=True)
+            except Exception as exc:
+                # Bound errors before JSON escaping; the ASCII reply remains
+                # below 2 KiB even when an exception contains non-ASCII text.
+                error = "".join(c if 32 <= ord(c) < 127 else "?" for c in str(exc))[:768]
+                reply = dict(id=token, ok=False, error=error)
+            sys.stdout.flush()
+            output.write(json.dumps(reply, ensure_ascii=True, separators=(",", ":")).encode() + b"\n")
+            if not reply["ok"]:
+                return  # A failed interpreter is never reused.
+
+
+if __name__ == "__main__":
+    sys.addaudithook(no_network)
+    if len(sys.argv) == 3 and sys.argv[1] == "--serve":
+        serve(sys.argv[2])
+    else:
+        folder = Path(sys.argv[1]).resolve()
+        request = validated_request(folder)
+        {"prepare": prepare, "infer": infer, "finish": finish}[sys.argv[2]](folder, request)

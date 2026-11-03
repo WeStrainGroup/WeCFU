@@ -1,5 +1,5 @@
 {% set name = "wecfu" %}
-{% set version = "1.2.0" %}
+{% set version = "1.2.1" %}
 
 package:
   name: {{ name|lower }}
@@ -60,7 +60,7 @@ about:
     WeCFU is a local web tool for counting colonies on petri-dish photos.
     Review plate photos, correct colony markers, and export CSV or ZIP.
     The noarch package includes the interface and classical methods.
-    Fusion v2 uses the separately installed, pinned models extra and
+    Ultra uses the separately installed, pinned SAM model runtime and
     verified model cache; see INSTALL.md. It never silently substitutes
     a classical result when a selected model is unavailable.
 

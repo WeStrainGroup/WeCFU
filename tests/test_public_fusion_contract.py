@@ -32,6 +32,7 @@ def sha(raw):
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     monkeypatch.setattr(server, 'detect_plate', lambda pixels: server.PlateCircle(60, 50, 40))
+    monkeypatch.setattr('wecfu.pipeline.detect_plate', lambda pixels: server.PlateCircle(60, 50, 40))
     root = tmp_path / 'workspace'
     app = server.build_app(lambda: root)
     return app, root
@@ -51,7 +52,7 @@ def initialized(client):
 
 
 def preview_request(state, raw):
-    return {'engine': fusion.ENGINE, 'expected_revision': state['revision'],
+    return {'engine': server.sam_runtime.ENGINE, 'expected_revision': state['revision'],
             'expected_image_sha256': sha(raw), 'model_params': {}}
 
 
@@ -77,6 +78,12 @@ def install_fake_predict(app, monkeypatch, *, callback=None):
         marks = [{'id': 1, 'cx': 60., 'cy': 50., 'r': 8., 'score': .9, 'accepted': True, 'source': 'cv'}]
         return marks, 1, fake_provenance(raw, server.asdict(plate), view)
     monkeypatch.setattr(manager, 'predict_fusion', predict)
+    def sam_predict(raw, plate, digest):
+        assert digest == sha(raw)
+        if callback:
+            callback()
+        return [{'id': 1, 'cx': 60., 'cy': 50., 'r': 8., 'score': .9, 'accepted': True, 'source': 'cv'}], 1
+    monkeypatch.setattr(manager, 'predict_sam', sam_predict)
     return manager
 
 
@@ -93,14 +100,14 @@ def test_upload_declares_exact_bytes_and_does_not_create_review(app, view):
         assert not (root/'references').exists()
 
 
-def test_path_import_default_main_is_explicit_contract(app, tmp_path):
+def test_path_import_default_unknown_is_unified_contract(app, tmp_path):
     application, root = app
     source = tmp_path/'looks_like_back.png'; source.write_bytes(picture())
     with TestClient(application) as client:
         r = client.post('/api/ingest', json={'paths': [str(source)], 'batch': 'demo'})
         assert r.status_code == 200
         url = '/api/batch/demo/image/looks_like_back.png/source_view'
-        assert client.get(url).json()['view'] == 'main'  # Declaration, never filename inference.
+        assert client.get(url).json()['view'] == 'unknown'  # Unified import never invents a view.
         r = client.post('/api/ingest', json={'paths': [str(source)], 'batch': 'other', 'view': 'back'})
         assert r.status_code == 200
         assert client.get('/api/batch/other/image/looks_like_back.png/source_view').json()['view'] == 'back'
@@ -147,7 +154,7 @@ def test_existing_valid_declared_view_takes_precedence_over_import_default(tmp_p
 
 
 @pytest.mark.parametrize('view', ['unknown', 'back'])
-def test_unsupported_view_never_calls_model_or_traditional(app, monkeypatch, view):
+def test_old_fusion_request_never_calls_model_or_traditional(app, monkeypatch, view):
     application, root = app
     def forbidden(*args, **kwargs):
         pytest.fail('unsupported view must not run a model or fallback')
@@ -155,7 +162,7 @@ def test_unsupported_view_never_calls_model_or_traditional(app, monkeypatch, vie
     monkeypatch.setattr(server, 'process_image', forbidden)
     with TestClient(application) as client:
         raw = upload(client, view=view); state = initialized(client)
-        assert client.post(BASE+'/model-preview', json=preview_request(state, raw)).status_code == 409
+        assert client.post(BASE+'/model-preview', json={**preview_request(state, raw), 'engine': fusion.ENGINE}).status_code == 409
         assert client.post(BASE+'/run').status_code == 422  # Custom algorithm must be explicit.
         assert client.post('/api/batch/demo/run').status_code == 422
         assert client.get(BASE+'/detections').json() == state
@@ -165,8 +172,8 @@ def test_model_unavailable_has_no_fallback(app, monkeypatch):
     application, root = app
     manager = application.state.model_preview_manager
     def missing(*args, **kwargs):
-        raise model_preview.PreviewError(503, 'Fusion v2 unavailable; no fallback was run')
-    monkeypatch.setattr(manager, 'predict_fusion', missing)
+        raise model_preview.PreviewError(503, 'SAM unavailable; no fallback was run')
+    monkeypatch.setattr(manager, 'predict_sam', missing)
     monkeypatch.setattr(server, 'process_image', lambda *a, **k: pytest.fail('fallback prohibited'))
     with TestClient(application) as client:
         raw = upload(client); state = initialized(client)
@@ -225,7 +232,8 @@ def test_default_capability_and_busy_guard_never_load_models(app, monkeypatch, t
     monkeypatch.setattr(fusion, 'AUTHORIZATION', tmp_path/'missing.json')
     with TestClient(application) as client:
         cfg = client.get('/api/config').json()
-        assert cfg['default_count_engine'] == cfg['default_model'] == fusion.ENGINE
+        assert cfg['default_count_engine'] == server._COMPONENT_ENGINE and cfg['default_model'] == server.sam_runtime.ENGINE
+        assert cfg['refinement_model'] == server.sam_runtime.ENGINE
         assert cfg['default_model_fallback'] is False and cfg['internal'] is False
         assert cfg['models']['fusion_v2']['available'] is False
         assert cfg['models']['fusion_v2']['fallback'] is False

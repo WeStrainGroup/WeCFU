@@ -17,6 +17,7 @@ import threading
 import time
 import zipfile
 from copy import deepcopy
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
 from dataclasses import asdict
@@ -50,14 +51,14 @@ _LOCKS: dict[tuple, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 _COMPONENT_ENGINE = "component_watershed_v1"
 _SAM_FROZEN_ENGINE = "sam2_cv_frozen_v1"
-_INTERNAL_DEFAULT_PARAMS = {"plate_inset": 0.88, "min_value": 200, "max_saturation": 100,
+_INTERNAL_DEFAULT_PARAMS = {"plate_inset": 0.95, "min_value": 200, "max_saturation": 100,
                             "min_circularity": 0.55, "min_area_frac": 0.0001, "peak_min_distance": 15}
 
 
 class IngestBody(BaseModel):
     paths: List[str]
     batch: Optional[str] = None
-    view: Literal["main", "blank", "back", "unknown"] = "main"
+    view: Literal["main", "blank", "back", "unknown"] = "unknown"
 
 
 class CircleBody(BaseModel):
@@ -215,6 +216,7 @@ class ModelPreviewBody(BaseModel):
     expected_revision: int = Field(ge=0, strict=True)
     expected_image_sha256: StrictStr = Field(pattern="^[0-9a-f]{64}$")
     model_params: ModelParamsBody | FixedSamParamsBody
+    only_unrecognized: StrictBool = False
 
     @model_validator(mode="after")
     def fixed_engine_parameters(self):
@@ -232,6 +234,7 @@ class ApplyModelPreviewBody(BaseModel):
     expected_image_sha256: StrictStr = Field(pattern="^[0-9a-f]{64}$")
     replace_all: StrictBool
     request_id: StrictStr = Field(min_length=1, max_length=100, pattern="^[A-Za-z0-9_-]+$")
+    only_unrecognized: StrictBool = False
 
     @model_validator(mode="after")
     def explicit_replacement(self):
@@ -407,6 +410,35 @@ def _require_machine_assistance(root: Path, batch: str) -> None:
     mode = review_queues.annotation_mode_for_batch(root, batch)
     if mode in ('manual_only', 'assisted_frozen'):
         raise HTTPException(403, "This review batch does not permit rerunning or replacing its initial machine predictions.")
+
+
+def _require_unrecognized(root: Path, batch: str, name: str, state: dict) -> None:
+    """Caller holds the image lock; browsing is not recognition or review."""
+    reason = None
+    if state.get("counted"):
+        reason = "already_counted"
+    elif state.get("counted") is not False:
+        reason = "legacy_status_unknown"
+    elif state.get("detections"):
+        reason = "existing_marks"
+    elif state.get("machine_count_initial", 0):
+        reason = "machine_count_history"
+    elif state.get("mode") == "manual":
+        reason = "manual_mode"
+    elif state.get("reviewed"):
+        reason = "reviewed"
+    elif str(state.get("notes") or ""):
+        reason = "notes"
+    elif state.get("plate_manual"):
+        reason = "manual_plate"
+    else:
+        reference = _reference_path(root, batch, name)
+        # A withdrawn/historical or dangling reference still protects this image.
+        # No reference values are read and no reference status is changed here.
+        if reference.exists() or reference.is_symlink():
+            reason = "reference"
+    if reason:
+        raise HTTPException(409, f"only_unrecognized: {reason}; existing work was not replaced")
 
 
 def _assisted(root: Path, batch: str) -> bool:
@@ -611,7 +643,18 @@ def _csv_rows(rows: list[tuple[str, Optional[dict]]]) -> str:
 
 
 def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
-    app = FastAPI(title="WeCFU")
+    @asynccontextmanager
+    async def lifespan(app):
+        try:
+            yield
+        finally:
+            # Retire resident inference workers on a normal server shutdown,
+            # including ASGI test/restart lifecycles in the same interpreter.
+            import asyncio
+            from .sam_warm_pool import POOL
+            await asyncio.to_thread(POOL.shutdown)
+
+    app = FastAPI(title="WeCFU", lifespan=lifespan)
     preview_manager = model_preview.ModelPreviewManager(web_mode=web_mode)
     app.state.model_preview_manager = preview_manager
 
@@ -632,19 +675,37 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
 
     @app.get("/api/config")
     def get_config():
+        sam_capability = {**preview_manager.sam.capability(), "default_model": not web_mode}
+        fusion_v2_capability = {**preview_manager.fusion_v2.capability(), "default_model": False}
         return {"web_mode": web_mode, "internal": False,
                 "max_images": WEB_MAX_IMAGES if web_mode else None,
                 "max_bytes": WEB_MAX_BYTES if web_mode else None,
                 "builtin_algorithms": ["baseline"] if web_mode else ["baseline", _COMPONENT_ENGINE],
-                "default_count_engine": fusion_runtime_v2.ENGINE,
-                "default_model": fusion_runtime_v2.ENGINE,
+                "default_count_engine": "baseline" if web_mode else _COMPONENT_ENGINE,
+                # Preserve the user's default intent even when its runtime is
+                # unavailable. The client must report that, never silently fall
+                # back to the separately selectable classical engine.
+                "default_model": None if web_mode else sam_runtime.ENGINE,
+                "refinement_model": sam_runtime.ENGINE,
+                "recognition_policy_version": ("classical-default-explicit-sam-v1" if web_mode
+                                               else "sam-default-explicit-classical-v1"),
+                "recognition_policy": {
+                    "default_engine": "baseline" if web_mode else sam_runtime.ENGINE,
+                    "default_stages": (["classical_segmentation"] if web_mode else
+                                       ["classical_seed_preparation", "sam_segmentation", "fixed_postprocessing"]),
+                    "batch_scope": "unrecognized_only",
+                    "refinement_engine": sam_runtime.ENGINE,
+                    "refinement_scope": "current_image_explicit",
+                    "automatic_refinement": False,
+                    "automatic_fallback": False,
+                },
                 "default_model_fallback": False,
-                "import_view_contract": {"default": "main", "values": list(source_views.VIEWS),
-                                         "requires_user_declaration": True,
-                                         "meaning": "main means a front-facing Petri dish photo; this is not human count validation"},
+                "import_view_contract": {"default": "unknown", "values": list(source_views.VIEWS),
+                                         "requires_user_declaration": False,
+                                         "meaning": "Unified photo import; existing view metadata is preserved as provenance, not a separate counting recipe or human validation"},
                 "default_params": _dump(ParamsBody(**asdict(default_params()))),
                 "experimental_models": {"cfucounter": preview_manager.capability()},
-                "models": {"sam2": preview_manager.sam.capability(), "fusion": preview_manager.fusion.capability(), "fusion_v2": preview_manager.fusion_v2.capability()}}
+                "models": {"sam2": sam_capability, "fusion": preview_manager.fusion.capability(), "fusion_v2": fusion_v2_capability}}
 
     @app.get("/api/batches")
     def list_batches():
@@ -717,7 +778,7 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
 
     @app.post("/api/upload")
     def upload(batch: str = Form(...), files: list[UploadFile] = File(...),
-               view: Literal["main", "blank", "back", "unknown"] = Form("main")):
+               view: Literal["main", "blank", "back", "unknown"] = Form("unknown")):
         root = get_root()
         with _lock(root, batch):
             if web_mode and _count_images(root) + len(files) > WEB_MAX_IMAGES:
@@ -848,27 +909,63 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
     def run_one(batch: str, name: str, params: Optional[ParamsBody] = None,
                 engine: Literal["baseline", "component_watershed_v1"] = Query(...),
                 expected_revision: Optional[int] = Query(default=None, ge=0),
-                protect_existing_edits: bool = False):
+                protect_existing_edits: bool = False,
+                only_unrecognized: bool = False,
+                expected_image_sha256: Optional[str] = Query(default=None, pattern="^[0-9a-f]{64}$")):
         require_builtin_engine(engine)
         root = get_root()
         with _lock(root, batch, name):
             _require_machine_assistance(root, batch)
             image = _image_for(root, batch, name)
-            if protect_existing_edits and expected_revision is None:
+            if (protect_existing_edits or only_unrecognized) and expected_revision is None:
                 raise HTTPException(422, "protected recount requires expected_revision")
             existing = _maybe_state(root, batch, name)
-            if expected_revision is not None and expected_revision != int((existing or {}).get("revision", 0)):
-                raise HTTPException(409, "state changed; reload before recounting")
-            if protect_existing_edits:
-                state = existing or {}
-                reference = _reference_path(root, batch, name)
-                if (state.get("mode") == "manual" or state.get("reviewed") or state.get("plate_manual")
-                        or str(state.get("notes") or "").strip()
-                        or any(mark.get("source") == "manual" for mark in state.get("detections", []))
-                        or reference.exists() or reference.is_symlink()):
-                    raise HTTPException(409, "existing human edits or reference are protected from bulk recount")
-            process_image(image, _batch_dir(root, batch, "runs"), params=run_params(params, engine), force=True,
-                          write_overlay=False, overwrite_manual=True, engine=engine)
+
+            def check_context(current):
+                _require_machine_assistance(root, batch)
+                if expected_revision is not None and expected_revision != int((current or {}).get("revision", 0)):
+                    raise HTTPException(409, "state changed; reload before recounting")
+                if only_unrecognized:
+                    _require_unrecognized(root, batch, name, current or {"counted": False})
+                if protect_existing_edits:
+                    state = current or {}
+                    reference = _reference_path(root, batch, name)
+                    if (state.get("mode") == "manual" or state.get("reviewed") or state.get("plate_manual")
+                            or str(state.get("notes") or "")
+                            or any(mark.get("source") == "manual" for mark in state.get("detections", []))
+                            or reference.exists() or reference.is_symlink()):
+                        raise HTTPException(409, "existing human edits or reference are protected from bulk recount")
+
+            check_context(existing)
+            try:
+                snapshot = human_reference.read_source_snapshot(image)
+                if expected_image_sha256 is not None and snapshot.sha256 != expected_image_sha256:
+                    raise HTTPException(409, "source differs from the displayed image; reload before recounting")
+                # Keep the unchanged classical pipeline isolated until the exact
+                # source, state and protection checks all pass again. This also
+                # prevents external source replacement during segmentation from
+                # committing detections for different bytes.
+                with tempfile.TemporaryDirectory(prefix="wecfu-classical-") as temporary:
+                    staging = Path(temporary)
+                    frozen_image = staging / "inputs" / image.name
+                    frozen_image.parent.mkdir()
+                    frozen_image.write_bytes(snapshot.payload)
+                    run_dir = staging / "runs"
+                    output = run_dir / "detections" / (image.name + ".json")
+                    if existing is not None:
+                        atomic_write_json(output, existing)
+                    process_image(frozen_image, run_dir, params=run_params(params, engine), force=True,
+                                  write_overlay=False, overwrite_manual=True, engine=engine)
+                    candidate = json.loads(output.read_bytes())
+                    human_reference.assert_source_unchanged(image, snapshot)
+                    current = _maybe_state(root, batch, name)
+                    if current != existing:
+                        raise HTTPException(409, "state changed during recounting; existing work was not replaced")
+                    check_context(current)
+                    candidate["revision"] = int((existing or {}).get("revision", 0))
+                    _save_state(root, batch, name, candidate)
+            except (OSError, human_reference.ReferenceError) as exc:
+                raise HTTPException(409, "source changed or became unavailable during recounting; existing work was not replaced") from exc
             return _load_state(root, batch, name)
 
     def preview_call(function, *args, **kwargs):
@@ -899,12 +996,15 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
         if not enabled:
             raise HTTPException(503, "The selected model is unavailable. Install/configure its runtime or explicitly choose a custom method; no fallback was run.")
 
-    def preview_context(root: Path, batch: str, name: str, revision: int, digest: str):
+    def preview_context(root: Path, batch: str, name: str, revision: int, digest: str,
+                        *, only_unrecognized: bool = False):
         _require_machine_assistance(root, batch)
         image = _image_for(root, batch, name)
         state = _load_state(root, batch, name)
         if state.get("revision", 0) != revision:
             raise HTTPException(409, "state changed; reload or save edits before model preview")
+        if only_unrecognized:
+            _require_unrecognized(root, batch, name, state)
         if state.get("mode", "auto") != "auto":
             raise HTTPException(409, "switch to automatic assistance before model preview")
         snapshot = preview_source(image, digest)
@@ -914,6 +1014,16 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
         except (KeyError, ValueError, TypeError) as exc:
             raise HTTPException(422, "saved plate geometry is invalid") from exc
         return image, state, snapshot
+
+    def declared_sam_view(root: Path, batch: str, name: str, image: Path, digest: str) -> str:
+        """Bind the supported photo view to the exact input bytes, not its filename."""
+        try:
+            declaration = source_views.get(root, batch, name, image, expected_sha256=digest)
+            # Unified import does not infer or rewrite a photo view. Preserve
+            # any exact-byte metadata as provenance; all views use one recipe.
+            return declaration["view"]
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     def recovery_folder(root, batch, name):
         return _batch_dir(root, batch, "runs") / "model_preview_recovery" / _component(name)
@@ -985,6 +1095,10 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
 
     @app.post("/api/batch/{batch}/image/{name}/model-preview")
     def create_model_preview(batch: str, name: str, body: ModelPreviewBody):
+        if body.only_unrecognized and (web_mode or body.engine != sam_runtime.ENGINE):
+            raise HTTPException(409, "Model batch recognition supports only local SAM. Reload the page before continuing; no fallback was run.")
+        if body.engine in _FUSION_ENGINES:
+            raise HTTPException(409, "Fine refinement now uses SAM without DINO. Reload the page before continuing; saved Fusion results are preserved.")
         require_preview_enabled(body.engine)
         root = get_root()
         started = time.perf_counter()
@@ -992,11 +1106,16 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
                            if body.engine == fusion_runtime_v2.ENGINE else fusion_runtime.TIMEOUT_SECONDS)
         deadline = time.monotonic() + timeout_seconds
         fusion_provenance = None
+        sam_view = None
         with _lock(root, batch, name):
-            image, state, snapshot = preview_context(root, batch, name, body.expected_revision, body.expected_image_sha256)
+            image, state, snapshot = preview_context(root, batch, name, body.expected_revision,
+                                                     body.expected_image_sha256,
+                                                     only_unrecognized=body.only_unrecognized)
             saved_inset = state.get("params", {}).get("plate_inset", SegmentParams.plate_inset)
             if body.engine == model_preview.ENGINE and body.model_params.plate_inset != saved_inset:
                 raise HTTPException(409, "model ROI differs from saved parameters; save the current parameters first")
+            if body.engine == sam_runtime.ENGINE:
+                sam_view = declared_sam_view(root, batch, name, image, snapshot.sha256)
             if body.engine in _FUSION_ENGINES:
                 if state.get("plate_manual"):
                     raise HTTPException(409, "Fusion requires an automatic medium boundary; the current manual boundary will not be replaced")
@@ -1043,13 +1162,18 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
             raise HTTPException(503, "model produced invalid candidate geometry; no candidate was created") from exc
         with _lock(root, batch, name):
             try:
-                _, current, final_snapshot = preview_context(root, batch, name, body.expected_revision, snapshot.sha256)
+                _, current, final_snapshot = preview_context(root, batch, name, body.expected_revision,
+                                                            snapshot.sha256,
+                                                            only_unrecognized=body.only_unrecognized)
             except HTTPException as exc:
                 if exc.status_code == 404:
                     raise HTTPException(409, "image or state changed during model preview") from exc
                 raise
             if model_preview.state_signature(current) != signature:
                 raise HTTPException(409, "state changed during model preview; run a new preview")
+            if body.engine == sam_runtime.ENGINE:
+                if declared_sam_view(root, batch, name, image, snapshot.sha256) != sam_view:
+                    raise HTTPException(409, "Source view changed during preview; request a new SAM preview")
             if body.engine == fusion_runtime_v2.ENGINE:
                 try:
                     declared = source_views.get(root, batch, name, image, expected_sha256=snapshot.sha256)
@@ -1067,11 +1191,12 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
                 (str(root.resolve()), batch, name), current, snapshot.sha256,
                 model_params, [_dump(d) for d in validated], raw_count,
                 (time.perf_counter() - started) * 1000, engine=body.engine, fusion_provenance=fusion_provenance,
+                source_view=sam_view,
+                only_unrecognized=body.only_unrecognized,
             )
 
     @app.post("/api/batch/{batch}/image/{name}/model-preview/apply")
     def apply_model_preview(batch: str, name: str, body: ApplyModelPreviewBody):
-        require_preview_enabled()
         root = get_root()
         with _lock(root, batch, name):
             _require_machine_assistance(root, batch)
@@ -1079,6 +1204,9 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
             state = _load_state(root, batch, name)
             snapshot = preview_source(image, body.expected_image_sha256)
             request = _dump(body)
+            if not body.only_unrecognized:
+                # Keep previously persisted explicit single-image retry receipts valid.
+                request.pop("only_unrecognized")
             receipt = state.get("_model_preview_apply")
             if receipt and receipt.get("request_id") == body.request_id:
                 if receipt.get("request") != request:
@@ -1092,9 +1220,21 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
                 raise HTTPException(409, "state changed; run a new model preview before replacing marks")
             record = preview_call(preview_manager.candidate, body.candidate_id, (str(root.resolve()), batch, name))
             candidate = record["result"]
+            if candidate["engine"] in _FUSION_ENGINES:
+                raise HTTPException(409, "Fine refinement now uses SAM without DINO. Reload the page before continuing; saved Fusion results are preserved.")
+            if body.only_unrecognized and (web_mode or candidate["engine"] != sam_runtime.ENGINE):
+                raise HTTPException(409, "Model batch recognition supports only local SAM. Reload the page before continuing; no fallback was run.")
+            if bool(record.get("only_unrecognized", False)) != body.only_unrecognized:
+                raise HTTPException(409, "Model preview batch intent changed. Reload the page and request a matching preview before adoption.")
+            if body.only_unrecognized:
+                _require_unrecognized(root, batch, name, state)
             require_preview_enabled(candidate["engine"])
             is_sam = candidate["engine"] == sam_runtime.ENGINE
             is_fusion = candidate["engine"] in _FUSION_ENGINES
+            if is_sam:
+                current_view = declared_sam_view(root, batch, name, image, snapshot.sha256)
+                if current_view != candidate.get("source_view"):
+                    raise HTTPException(409, "Source view changed since model preview; request a new SAM preview")
             if candidate["engine"] == fusion_runtime_v2.ENGINE:
                 try:
                     declaration = source_views.get(root, batch, name, image, expected_sha256=snapshot.sha256)
@@ -1141,11 +1281,15 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
                 human_reference.assert_source_unchanged(image, snapshot)
             except (OSError, human_reference.ReferenceChanged) as exc:
                 raise HTTPException(409, "source changed before adoption; reload the image") from exc
+            if body.only_unrecognized:
+                _require_unrecognized(root, batch, name, before_state)
             persist_recovery(root, batch, name, recovery_id, before_state, snapshot.sha256, body.candidate_id)
             try:
                 human_reference.assert_source_unchanged(image, snapshot)
             except (OSError, human_reference.ReferenceChanged) as exc:
                 raise HTTPException(409, "source changed before adoption; reload the image") from exc
+            if body.only_unrecognized:
+                _require_unrecognized(root, batch, name, before_state)
             _save_state(root, batch, name, state)
             return state
 

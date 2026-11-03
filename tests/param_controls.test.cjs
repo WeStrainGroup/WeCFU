@@ -45,7 +45,10 @@ function createUI(stubChanges = true) {
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       value: id === 'p-radius' ? '40' : '', checked: true, hidden: false, dataset: {}, classList: {toggle() {}},
-      style: {setProperty() {}}, setAttribute() {},
+      style: {setProperty() {}}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); },
+      getAttribute(name) { return this.attributes[name] ?? null; },
+      removeAttribute(name) { delete this.attributes[name]; },
       checkValidity() { return this.value !== '' && Number.isFinite(Number(this.value)); },
     });
     return elements.get(id);
@@ -81,13 +84,14 @@ test('new defaults are explicit while legacy and color presets retain exact valu
   const ui = createUI();
   const presets = plain(ui.run('PRESETS'));
   const original = {plate_inset: .82, min_value: 200, max_saturation: 60, min_circularity: .55, min_area_frac: .0001, peak_min_distance: 15};
-  assert.deepEqual(presets, {white: {...original, plate_inset: .88, max_saturation: 100}, legacy: original, cream: {...original, min_value: 180, max_saturation: 100},
+  assert.deepEqual(presets, {white: {...original, plate_inset: .95, max_saturation: 100}, legacy: original, cream: {...original, min_value: 180, max_saturation: 100},
     yellow: {...original, min_value: 160, max_saturation: 200, min_circularity: .50},
     any: {...original, min_value: 140, max_saturation: 255, min_circularity: .45}});
   for (const [name, raw] of Object.entries(presets)) {
     ui.run(`fillParams(PRESETS[${JSON.stringify(name)}]);`);
     assert.deepEqual(plain(ui.run('paramsBody()')), raw);
     assert.equal(ui.element('preset-select').value, name);
+    if (name === 'white') assert.equal(ui.element('v-inset').value, '0.90');
   }
   for (const previewChoice of [false, true]) {
     ui.element('p-preview').checked = previewChoice;
