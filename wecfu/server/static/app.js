@@ -397,6 +397,8 @@ function updateWorkflowControls() {
   const defaultSam = !custom && workflowDefaultEngine() === SAM_ENGINE;
   const defaultCapability = modelCapability(SAM_ENGINE);
   const defaultUnavailable = defaultSam && (!defaultCapability.enabled || !defaultCapability.available);
+  // Keep actions disabled while capability is unknown, without calling it a runtime failure.
+  const showUnavailable = Boolean(state.config) && defaultUnavailable;
   const locked = state.loading || state.busy || Boolean(state.crop) || applyPending() || reviewBlocked();
   $('profile-option-default').textContent = t('profileDefault');
   $('profile-option-classical').hidden = false;
@@ -409,8 +411,8 @@ function updateWorkflowControls() {
   $('btn-recognize-all').hidden = !normal;
   $('btn-recognize-all').disabled = locked || previewActive() || !state.imageList.length
     || $('mode-select').value === 'manual' || defaultUnavailable;
-  $('batch-hint').textContent = defaultUnavailable ? t('modelUnavailable') : '';
-  $('batch-hint').hidden = !defaultUnavailable;
+  $('batch-hint').textContent = showUnavailable ? t('modelUnavailable') : '';
+  $('batch-hint').hidden = !showUnavailable;
   $('btn-adjustments-toggle').hidden = !custom;
   $('btn-adjustments-toggle').disabled = locked || previewActive();
   $('btn-adjustments-toggle').textContent = t(state.workflow.adjustmentsOpen ? 'collapseAdjustments' : customDraftPending() ? 'adjustmentsPending' : 'openAdjustments');
@@ -1057,7 +1059,7 @@ function updateModelControls() {
   $('model-warning').textContent = t(selectedModelEngine() === FUSION_V2_ENGINE ? 'fusionV2Warning' : fusionMethod() ? 'fusionWarning' : samMethod() ? 'samWarning' : 'modelWarning');
   $('model-roi-hint').textContent = t(fusionMethod() ? 'fusionRoiHint' : samMethod() ? 'samRoiHint' : 'modelRoiHint');
   const trialVisible = trial.loading || trial.candidate || trial.error || trial.pendingApply || trial.message;
-  $('model-tools').hidden = !selected || (normalWorkflow() && !trialVisible && !manualFusionPlate && !unsupportedView && capability.available);
+  $('model-tools').hidden = !state.config || !selected || (normalWorkflow() && !trialVisible && !manualFusionPlate && !unsupportedView && capability.available);
   const replacementHint = $('model-tools').querySelector?.('.model-replacement');
   if (replacementHint) replacementHint.hidden = normalWorkflow() && !trial.candidate && !trial.pendingApply;
   $('btn-model-preview').disabled = !enabled || !capability.available || !selected || manual || manualFusionPlate || unsupportedView || locked || !state.doc || !state.img || trial.loading || !roiValid;
@@ -1074,7 +1076,7 @@ function updateModelControls() {
   $('model-count').textContent = trial.candidate
     ? `${t(samMethod() ? 'samPreview' : 'modelTemporary')}: ${trial.candidate.candidate_count} · ${t('modelCurrent')}: ${state.detections.length} · ${t('modelNotAdopted')}` : '';
   $('model-empty-warning').hidden = !trial.candidate || trial.candidate.candidate_count !== 0;
-  $('model-message').textContent = trial.error || (trial.pendingApply ? t('modelApplying') : trial.loading ? t('modelLoading')
+  $('model-message').textContent = !state.config ? '' : trial.error || (trial.pendingApply ? t('modelApplying') : trial.loading ? t('modelLoading')
     : manual ? t('modelManual') : unsupportedView ? t('sourceViewRequired') : manualFusionPlate ? t('fusionAutomaticPlateRequired') : !capability?.available
       ? `${t('modelUnavailable')}${typeof capability?.reason === 'string' && capability.reason ? ` ${capability.reason}` : ''}`
       : trial.message ? t(trial.message) : '');

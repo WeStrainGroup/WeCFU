@@ -100,6 +100,64 @@ function samDefault(view) {
   view.run("state.config.default_model = SAM_ENGINE; state.workflow.kind = 'default'; syncWorkflowRoute(); updateControls();");
 }
 
+for (const available of [true, false]) {
+  test(`initial Ultra waits for capability before displaying ${available ? 'ready' : 'unavailable'} state`, async () => {
+    const v = ui(); samDefault(v);
+    v.context.configAvailable = available;
+    v.run(`let finishConfig;
+      const nextConfig = clone(state.config); nextConfig.models.sam2.available = configAvailable;
+      delete state.config; updateControls();
+      jsonRequest = async (url) => {
+        calls.push({url});
+        if (url !== '/api/config') throw Error('Unexpected request before configuration');
+        return new Promise(resolve => { finishConfig = resolve; });
+      };`);
+    const pending = v.run('applyServerConfig()');
+    assert.equal(v.element('batch-hint').hidden, true);
+    assert.equal(v.element('batch-hint').textContent, '');
+    assert.equal(v.element('model-tools').hidden, true);
+    assert.equal(v.element('model-message').textContent, '');
+    assert.equal(v.element('btn-recognize-current').disabled, true);
+    assert.equal(v.element('btn-recognize-all').disabled, true);
+    assert.equal(v.element('method-select').value, 'sam2_local_v1');
+    assert.deepEqual(plain(v.run('calls')), [{url:'/api/config'}]);
+    v.run('finishConfig(nextConfig);');
+    await pending;
+    assert.equal(v.element('batch-hint').hidden, available);
+    assert.equal(v.element('batch-hint').textContent, available ? '' : 'modelUnavailable');
+    assert.equal(v.element('model-tools').hidden, available);
+    assert.equal(v.element('model-message').textContent, available ? '' : 'modelUnavailable');
+    assert.equal(v.element('btn-recognize-current').disabled, !available);
+    assert.equal(v.element('btn-recognize-all').disabled, !available);
+    assert.equal(v.element('method-select').value, 'sam2_local_v1');
+    assert.equal(v.run('saves.length'), 0);
+    assert.deepEqual(v.errors, []);
+  });
+}
+
+test('a failed initial configuration reports the request failure without claiming SAM is unavailable', async () => {
+  const v = ui(); samDefault(v);
+  v.run(`let failConfig;
+    delete state.config; updateControls();
+    jsonRequest = async (url) => {
+      calls.push({url});
+      return new Promise((_, reject) => { failConfig = reject; });
+    };`);
+  const pending = v.run('applyServerConfig().catch(handleError)');
+  v.run("failConfig(Error('synthetic configuration request failed'));");
+  await pending;
+  assert.equal(v.element('batch-hint').hidden, true);
+  assert.equal(v.element('model-tools').hidden, true);
+  assert.equal(v.element('model-message').textContent, '');
+  assert.equal(v.element('btn-recognize-current').disabled, true);
+  assert.equal(v.element('btn-recognize-all').disabled, true);
+  assert.equal(v.element('status').textContent, 'actionFailed: synthetic configuration request failed');
+  assert.equal(v.element('status').classList.contains('error'), true);
+  assert.equal(v.errors.length, 1);
+  assert.equal(v.run('saves.length'), 0);
+  assert.deepEqual(plain(v.run('calls')), [{url:'/api/config'}]);
+});
+
 for (const button of ['btn-recognize-all', 'btn-run']) {
   test(`wired ${button} uses serial SAM for local default and captures one capability`, async () => {
     const v = ui(); samDefault(v);
