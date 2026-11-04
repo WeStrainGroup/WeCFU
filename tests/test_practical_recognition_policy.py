@@ -53,13 +53,12 @@ def test_policy_declares_sam_default_without_availability_fallback(app, monkeypa
         config = client.get("/api/config").json()
     assert config["default_model"] == sam_runtime.ENGINE
     assert config["default_count_engine"] == server._COMPONENT_ENGINE  # Explicit classical/custom route.
-    assert config["refinement_model"] == sam_runtime.ENGINE
-    assert config["recognition_policy_version"] == "sam-default-explicit-classical-v1"
+    assert "refinement_model" not in config
+    assert config["recognition_policy_version"] == "unified-ultra-lite-custom-v2"
     assert config["recognition_policy"] == {
         "default_engine": sam_runtime.ENGINE,
         "default_stages": ["classical_seed_preparation", "sam_segmentation", "fixed_postprocessing"],
-        "batch_scope": "unrecognized_only", "refinement_engine": sam_runtime.ENGINE,
-        "refinement_scope": "current_image_explicit", "automatic_refinement": False,
+        "batch_scope": "unrecognized_only",
         "automatic_fallback": False,
     }
     assert config["default_model_fallback"] is False
@@ -199,7 +198,7 @@ def test_stale_single_fusion_request_rejected_before_runtime_or_workspace(app, m
     with TestClient(application) as client:
         response = client.post(BASE + "/model-preview", json={"engine": engine, "expected_revision": 0,
             "expected_image_sha256": "a" * 64, "model_params": {}})
-        assert response.status_code == 409 and "without DINO" in response.json()["detail"]
+        assert response.status_code == 409 and "Select Ultra, Lite or Custom" in response.json()["detail"]
         assert not root.exists()
 
 
@@ -219,7 +218,7 @@ def test_stale_model_batch_client_rejected_before_inference_or_writes(app, monke
         if engine == model_preview.ENGINE:
             request["model_params"] = {"plate_inset": .95}
         response = client.post(BASE + "/model-preview", json=request)
-        assert response.status_code == 409 and "only local SAM" in response.json()["detail"]
+        assert response.status_code == 409 and "requires SAM" in response.json()["detail"]
         assert manager._candidates == {}
         assert {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
 

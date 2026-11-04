@@ -1,4 +1,4 @@
-# Using WeCFU 1.2.1
+# Using WeCFU 1.2.2
 
 For installation and model setup, see [INSTALL.md](INSTALL.md).
 
@@ -8,18 +8,17 @@ Use **Add images**, or drop JPG, JPEG, PNG, TIF or TIFF files/folders into the
 page. The local app also accepts an image or folder path. Importing only adds
 photos; opening one does not run recognition. Original files are not modified.
 
-The local app offers three modes:
+The local and hosted apps offer three modes:
 
-- **Ultra**: fixed image-processing + SAM recognition, without DINO.
+- **Ultra**: fixed image-processing + SAM recognition, selected by default.
 - **Lite**: the improved traditional algorithm, with lower resource use.
 - **Custom**: traditional recognition with adjustable parameters; sliders do
   not tune SAM.
 
-The hosted app defaults to the classical Lite workflow and offers Custom
-controls. Detailed check can explicitly preview SAM for the current photo
-when available. Its classical baseline can differ from local Lite. If local
-Ultra cannot run, it reports the problem; select Lite explicitly for the
-non-model route.
+If Ultra cannot run, it reports the problem; select Lite explicitly for the
+non-model route. Ultra currently supports macOS and Linux, not Windows.
+The interface starts in English and remembers a supported language choice:
+English, Simplified Chinese, French or Russian.
 
 **Recognize all** in Ultra or Lite processes unrecognized photos one at a time.
 Already recognized photos, including zero-count results, are skipped. Existing
@@ -33,8 +32,7 @@ preview: **Adopt result** replaces the saved markers; **Cancel preview** keeps
 them. During preview, the image shows the candidate alone and labels its count;
 the saved result remains unchanged. Adoption can be undone. In Lite, the
 current photo is recounted directly, with confirmation before replacing
-protected manual work. **Detailed check** in Lite offers a SAM preview when
-the model is available; cancelling returns to Lite.
+protected manual work.
 
 ## Custom adjustments
 
@@ -79,8 +77,15 @@ status. **Viewing is not accuracy verification.** Explicit reference confirmatio
 is a separate feature in internal review queues.
 
 Edits and notes save to the workspace; watch the save indicator and retry if it
-reports failure. Local workspaces persist across server restarts. Undo history
-is a current-page convenience, not a backup of every prior session.
+reports failure. With normal local startup, each server run has a fresh session.
+Refreshing or closing a browser tab does not stop the local server or clear
+that session. Fully stop the server in its terminal (Ctrl-C) to end the session
+and clear its imported copies/links and counting records. Export anything you
+need first. Original photographs and older workspaces are not deleted.
+
+For persistent work, start with an explicit `--root /path/to/workspace`. That
+workspace survives stopping and restarting the server. Undo history remains a
+current-page convenience, not a backup of prior sessions.
 
 Use **Batch delete**, select photos or **Select all**, then **Delete selected**.
 Check the confirmation before proceeding. This removes workspace entries and

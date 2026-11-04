@@ -168,6 +168,25 @@ for (const status of ['verified', 'stale', 'withdrawn', 'invalid']) test(`existi
   assert.equal(f.callsTo('/initialize').length, 0);
 });
 
+test('web Ultra validates and adopts SAM with source and revision guards without a local reference endpoint', async () => {
+  const f = fixture({webMode: true, engine: model.SAM_ENGINE, before: null});
+  const result = await f.run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.doc.count_engine, model.SAM_ENGINE);
+  assert.deepEqual(result.doc.detections, MARKS);
+  assert.equal(f.callsTo('/reference').length, 0);
+  assert.equal(f.callsTo('/source_view').length, 0);
+  assert.deepEqual(f.callsTo('/model-preview').map(x => x.body), [{
+    engine:model.SAM_ENGINE, expected_revision:7, expected_image_sha256:HASH,
+    model_params:{}, only_unrecognized:true,
+  }]);
+  assert.deepEqual(f.callsTo('/model-preview/apply').map(x => ({...x.body, request_id:'bound-request'})), [{
+    candidate_id:'synthetic-candidate', expected_revision:7, expected_image_sha256:HASH,
+    request_id:'bound-request', replace_all:true, only_unrecognized:true,
+  }]);
+  assert.equal(result.doc.revision, 8);
+});
+
 test('reference API failure fails closed; web mode does not call the disabled local reference API', async () => {
   const failed = fixture({referenceError: error(503)});
   assert.equal((await failed.run()).status, 'failed'); noInference(failed);

@@ -16,7 +16,6 @@ ENV HOME=/home/user \
     WECFU_SESSIONS_ROOT=/tmp/wecfu_sessions \
     WECFU_MODEL_HOME=/home/user/.cache/wecfu/models \
     WECFU_SAM_DEVICE=cpu \
-    WECFU_ENABLE_FUSION_V2=1 \
     SAM2_BUILD_CUDA=0 \
     HF_HUB_DISABLE_TELEMETRY=1 \
     OMP_NUM_THREADS=1 \

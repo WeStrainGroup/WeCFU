@@ -85,7 +85,7 @@ function ui() {
     state.saveQueues.set(keyFor(), {revision: 9});
     $('modal-backdrop').hidden = $('export-backdrop').hidden = true;
     $('p-radius').value = 40; $('mode-select').value = 'auto';
-    initializeWorkflow(); adopt(fixtureDoc); wireUpHandlers();
+    initializeWorkflow(); state.workflow.kind = 'classical'; adopt(fixtureDoc); wireUpHandlers();
   `);
   return {run, context, element, node, document, window, errors,
     async key(event) { for (const fn of windowListeners.get('keydown') || []) await fn(event); }};
@@ -97,7 +97,7 @@ function custom(view) {
 }
 
 function samDefault(view) {
-  view.run('state.config.default_model = SAM_ENGINE; syncWorkflowRoute(); updateControls();');
+  view.run("state.config.default_model = SAM_ENGINE; state.workflow.kind = 'default'; syncWorkflowRoute(); updateControls();");
 }
 
 for (const button of ['btn-recognize-all', 'btn-run']) {
@@ -257,19 +257,56 @@ test('explicit classical profile keeps improved builtin current and batch routes
   assert.deepEqual(v.errors, []);
 });
 
-test('web mode stays on builtin even with a local SAM default in a stale configuration', () => {
+test('web exposes all three profiles and never relabels unavailable Ultra as Lite', async () => {
   const v = ui(); samDefault(v);
+  v.run('state.config.web_mode=true; state.config.models.sam2.available=false; syncWorkflowRoute(); updateControls();');
   assert.equal(v.element('profile-option-default').textContent, 'profileDefault');
   assert.equal(v.element('profile-option-classical').hidden, false);
-  v.run('state.config.web_mode=true; state.config.models.sam2.available=false; syncWorkflowRoute(); updateControls();');
-  assert.equal(v.element('profile-option-default').textContent, 'profileClassical');
-  assert.equal(v.element('profile-option-classical').hidden, true);
-  assert.equal(v.element('mode-info-title').textContent, 'profileClassical');
-  assert.equal(v.element('method-select').value, 'baseline');
-  assert.equal(v.element('recognition-route').textContent, 'classicalRoute');
+  assert.equal(v.element('mode-info-title').textContent, 'profileDefault');
+  assert.equal(v.element('method-select').value, 'sam2_local_v1');
+  assert.equal(v.element('recognition-route').textContent, 'defaultRoute');
+  assert.equal(v.element('btn-recognize-current').disabled, true);
+  assert.equal(v.element('btn-recognize-all').disabled, true);
+  await v.element('btn-recognize-current').fire('click');
+  await v.element('btn-recognize-all').fire('click');
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+  assert.equal(v.element('status').textContent, 'modelUnavailable');
+  assert.deepEqual(v.errors, []);
+});
+
+test('web Ultra recognizes the selected image and serial batch through SAM only', async () => {
+  const v = ui(); samDefault(v);
+  v.run(`state.config.web_mode=true;
+    adopt({...fixtureDoc, counted:false, detections:[], machine_count_initial:0, count_engine:null});
+    state.imageList = [{name:'first.png'}, {name:'second.png'}];
+    let recognizedItems=[], activeItems=0, maxActiveItems=0;
+    window.WECFU_DEFAULT_BATCH = {...window.WECFU_DEFAULT_BATCH,
+      recognizeBuiltin: async () => { throw Error('Ultra must not invoke Lite'); },
+      recognize: async item => {
+        activeItems++; maxActiveItems=Math.max(maxActiveItems,activeItems);
+        recognizedItems.push(clone(item)); await Promise.resolve(); activeItems--;
+        return {name:item.name,status:'completed'};
+      }}; updateControls();`);
   assert.equal(v.element('btn-recognize-current').disabled, false);
   assert.equal(v.element('btn-recognize-all').disabled, false);
-  assert.equal(v.run('calls.length'), 0);
+  await v.element('btn-recognize-current').fire('click');
+  assert.deepEqual(plain(v.run('recognizedItems.map(x => x.name)')), ['first.png']);
+  v.run('recognizedItems=[];');
+  await v.element('btn-recognize-all').fire('click');
+  assert.deepEqual(plain(v.run('recognizedItems.map(x => x.name)')), ['first.png','second.png']);
+  assert.equal(v.run('recognizedItems.every(x => x.engine === SAM_ENGINE && x.webMode === true)'), true);
+  assert.equal(v.run('maxActiveItems'), 1);
+  assert.equal(v.run('saves.length'), 0);
+  assert.deepEqual(v.errors, []);
+});
+
+test('recognition menu has exactly Ultra Lite and Custom with no separate refinement entry', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../wecfu/server/static/index.html'), 'utf8');
+  const select = html.match(/<select id="recognition-profile">([\s\S]*?)<\/select>/)[1];
+  assert.deepEqual([...select.matchAll(/<option[^>]+value="([^"]+)"/g)].map(x => x[1]), ['default','classical','custom']);
+  assert.doesNotMatch(html, /btn-refine-current|data-i18n="refineCurrent"/);
+  assert.doesNotMatch(source, /refineCurrent|btn-refine-current/);
 });
 
 test('custom parameter edits remain a draft and never save into the loaded document', () => {
@@ -958,19 +995,17 @@ test('public view declaration is SHA bound and never changes saved colony marks'
   assert.equal(v.run('state.sourceView'), 'back');
   assert.equal(v.element('btn-model-preview').disabled, true);
   assert.equal(v.element('btn-recognize-current').disabled, false);
-  assert.equal(v.element('btn-refine-current').disabled, false);
   assert.deepEqual(plain(v.run('calls[0].body')), {source_sha256: 'a'.repeat(64), view: 'back'});
   assert.deepEqual(plain(v.run('snapshot()')), before);
   assert.equal(v.run('saves.length'), 0);
 });
 
-test('public web uses its configured builtin without requiring SAM or enabling a new backend', () => {
+test('public Lite uses advertised improved builtin without requiring SAM', () => {
   const v = ui();
   v.run(`state.config.web_mode = true; state.config.models.sam2.available = false;
     syncWorkflowRoute(); updateControls();`);
-  assert.equal(v.element('method-select').value, 'baseline');
+  assert.equal(v.element('method-select').value, 'component_watershed_v1');
   assert.equal(v.element('btn-recognize-current').disabled, false);
-  assert.equal(v.element('btn-refine-current').disabled, true);
   assert.equal(v.element('model-tools').hidden, true);
 });
 

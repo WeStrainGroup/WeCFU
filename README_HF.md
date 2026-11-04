@@ -10,22 +10,27 @@ license: cc-by-nc-sa-4.0
 short_description: Count colonies, correct markers, export results
 ---
 
-# WeCFU 1.2.1
+# WeCFU 1.2.2
 
 Add plate photos, choose **Recognize all**, correct individual markers, and
 export counts as CSV or a bundle of annotated results.
 
-This hosted version defaults to the **classical image-processing workflow**,
-with Lite and Custom controls. **Detailed check** can explicitly preview a SAM
-result for the current photo when the runtime is available. It does not run
-models automatically or in a batch. Local WeCFU also offers Ultra (algorithm +
-SAM) and an improved Lite algorithm; results can differ from this web baseline.
+Choose one of three modes:
 
-Importing a photo does not start recognition. Lite's **Recognize all** preserves
-existing results and manual work. In Custom, adjust parameters, choose
-**Apply**, then recognize the current photo or all photos. Custom batch
-recognition can replace machine-only results, but skips manual edits, notes
-and other protected work.
+- **Ultra** (default): improved image processing with SAM.
+- **Lite**: the improved algorithm, with lower resource use.
+- **Custom**: adjustable algorithm parameters.
+
+Importing a photo does not start recognition. **Recognize all** processes
+unrecognized photos in order and preserves existing results and manual work.
+**Recognize current** processes one photo. Ultra previews a replacement for an
+existing result; adopt it or cancel. New Ultra results save directly. In
+Custom, adjust parameters, choose **Apply**, then recognize the current photo
+or all photos. Custom batch recognition can replace machine-only results, but
+skips manual edits, notes and other protected work.
+
+The interface starts in English and remembers your choice of English,
+Simplified Chinese, French or Russian.
 
 Machine markers are muted rose, and manual markers muted blue. Add a marker
 with a left click; remove one with a right click. Review missed, false and
@@ -40,7 +45,7 @@ leaving:** inactive workspaces are removed after approximately one hour, and a
 Space restart can remove them sooner. The ZIP export contains counts,
 annotated images and JSON, not the original input photos.
 
-For persistent local work and optional SAM support, see the
+For local processing, automatic SAM setup and optional persistent workspaces, see the
 [installation guide](https://github.com/WeStrainGroup/WeCFU/blob/main/INSTALL.md).
 Source, user guide and notices:
 [WeStrainGroup/WeCFU](https://github.com/WeStrainGroup/WeCFU).

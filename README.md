@@ -1,15 +1,18 @@
-# WeCFU 1.2.1
+# WeCFU 1.2.2
 
 A browser workspace for counting colonies on petri-dish photographs, correcting
 individual markers, and exporting counts with annotated images.
 
 ## Recognition modes
 
-| Mode | Local application |
+| Mode | Behavior |
 | --- | --- |
 | **Ultra** | The default: a fixed image-processing + SAM 2.1 recipe. |
 | **Lite** | The improved traditional algorithm, without loading a model. Faster and less demanding; complex colonies can require more manual correction. |
 | **Custom** | Traditional recognition with adjustable color, brightness, shape and separation settings. These controls do not tune SAM. |
+
+The interface starts in English and remembers your language choice: English,
+Simplified Chinese, French or Russian.
 
 Manual marking remains available. If Ultra is unavailable or fails, WeCFU reports
 the problem; it does not silently switch to Lite. You can choose Lite explicitly.
@@ -17,26 +20,23 @@ Changing modes does not change an already saved result.
 
 ## Install locally
 
-The Conda package includes the application and traditional methods. Ultra also
-requires the optional model dependencies and verified model cache on macOS or
-Linux. Use Python 3.12 for the model runtime.
+This release requires Python 3.12. On macOS or Linux:
 
 ```sh
-conda create -n wecfu -c westraingroup -c conda-forge python=3.12 pip wecfu=1.2.1 -y
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.2 -y
 conda activate wecfu
-python -m pip install "wecfu[models] @ https://github.com/WeStrainGroup/WeCFU/releases/download/v1.2.1/wecfu-1.2.1-py3-none-any.whl"
-python -m wecfu.setup_models
 wecfu serve
 ```
 
-On Linux, install the CPU-only PyTorch wheels in [INSTALL.md](INSTALL.md) before
-the model extra. SAM workers stay loaded between requests by default, reducing
-repeated startup work; predictions are never reused. Set
-`WECFU_SAM_WARM_WORKER=0` before starting the server to use the cold-process route.
+The first launch prepares and checks Ultra before opening the browser: fixed
+model dependencies in a separate cached environment, official SAM source, and
+the approximately 156 MB SAM checkpoint. Internet access is needed for this
+initial setup; later launches reuse the verified cache. No extra model-wheel
+installation is required in the Conda environment.
 
-Windows supports Lite, Custom and manual marking. The model runtime supports
-Linux CPU and macOS CPU/MPS; CUDA is not a supported device setting. See
-[INSTALL.md](INSTALL.md) for core-only installation, cache setup and upgrades.
+Linux uses CPU; macOS supports CPU/MPS. Windows supports Lite, Custom and manual
+marking; Ultra is not supported there. See [INSTALL.md](INSTALL.md) for offline
+startup, upgrades and persistent workspaces.
 
 ## Review and export
 
@@ -63,8 +63,10 @@ edit. Left/right arrows navigate when an input control is not focused.
 
 **Batch delete** removes selected photos and counting results from the workspace
 after confirmation. Original files are unchanged; removal cannot be undone.
-Local workspaces persist across restarts. See [USAGE.md](USAGE.md) for controls
-and export fields.
+A normal local launch starts with an empty session. Refreshing the page keeps
+its contents; stopping the local server clears that session’s imports and
+records. Export first. Original files and older workspaces remain untouched.
+An explicit `--root` keeps a persistent workspace. See [USAGE.md](USAGE.md).
 
 Output still needs review. This release does not establish accuracy across all
 organisms, media or imaging conditions. Marker circles identify locations; they
@@ -73,10 +75,9 @@ are not exact colony outlines.
 ## Use online
 
 Open [WeCFU on Hugging Face](https://huggingface.co/spaces/WeCFU/wecfu).
-The hosted app defaults to its classical Lite workflow and offers Custom
-controls. When SAM is available, **Detailed check** previews a SAM result for
-the current photo; it is not automatic or batch model recognition. The web
-classical baseline can produce different results from local Lite or Ultra.
+The hosted app offers the same **Ultra**, **Lite** and **Custom** modes, with
+Ultra selected by default. Ultra supports the current photo and serial batch
+recognition; there is no separate refinement action.
 
 Each visitor has a separate temporary workspace, limited to 100 images. An
 upload request is limited to 400 MiB. **Export before leaving:** inactive

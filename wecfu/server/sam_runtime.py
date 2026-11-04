@@ -174,6 +174,7 @@ class LocalSamProvider:
         self.enabled = os.environ.get("WECFU_ENABLE_SAM2", "1") != "0"
         self._guard = threading.Lock()
         self._checked_checkpoint = None
+        self._checked_runtime = None
         self.last_timings = None
 
     def require_available(self):
@@ -200,6 +201,19 @@ class LocalSamProvider:
                     self._checked_checkpoint = before
             if runtime_paths.verify_sam_source() != SOURCE_COMMIT:
                 raise RuntimeUnavailable("SAM2 source differs from its pinned revision")
+            runtime_key = (fingerprint(SAM_PYTHON), fingerprint(CV_PYTHON), SAM_DEVICE)
+            if self._checked_runtime != runtime_key:
+                from wecfu.runtime_bootstrap import _probe
+                environment = {**os.environ, "PYTHONPATH":str(REPO), "PYTHONDONTWRITEBYTECODE":"1",
+                               "PYTHONNOUSERSITE":"1", "WECFU_SAM_DEVICE":SAM_DEVICE,
+                               "HF_HUB_OFFLINE":"1", "TRANSFORMERS_OFFLINE":"1"}
+                try:
+                    _probe(SAM_PYTHON, RUNTIME, env=environment)
+                    if CV_PYTHON != SAM_PYTHON:
+                        _probe(CV_PYTHON, RUNTIME, env=environment)
+                except RuntimeError as exc:
+                    raise RuntimeUnavailable("Ultra runtime is not ready. Restart WeCFU to prepare it. " + str(exc)) from exc
+                self._checked_runtime = runtime_key
             return before
         except RuntimeUnavailable:
             raise

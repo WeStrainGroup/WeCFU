@@ -11,6 +11,7 @@ import hashlib
 import importlib.metadata as metadata
 import json
 import os
+import platform
 from pathlib import Path
 import sys
 import sysconfig
@@ -25,9 +26,11 @@ def model_home():
     return Path(os.environ.get('XDG_CACHE_HOME', str(Path.home()/'.cache'))) / 'wecfu/models'
 
 MODEL_HOME = model_home()
-MODEL_PYTHON = Path(os.environ.get('WECFU_MODEL_PYTHON', sys.executable)).expanduser().absolute()
-CV_PYTHON = Path(os.environ.get('WECFU_CV_PYTHON', sys.executable)).expanduser().absolute()
-SAM_DEVICE = os.environ.get('WECFU_SAM_DEVICE', 'mps' if sys.platform == 'darwin' else 'cpu')
+from .runtime_bootstrap import prepared_python
+_DEFAULT_PYTHON = str(prepared_python(MODEL_HOME) or sys.executable)
+MODEL_PYTHON = Path(os.environ.get('WECFU_MODEL_PYTHON', _DEFAULT_PYTHON)).expanduser().absolute()
+CV_PYTHON = Path(os.environ.get('WECFU_CV_PYTHON', _DEFAULT_PYTHON)).expanduser().absolute()
+SAM_DEVICE = os.environ.get('WECFU_SAM_DEVICE', 'mps' if sys.platform == 'darwin' and platform.machine() == 'arm64' else 'cpu')
 if SAM_DEVICE not in ('mps', 'cpu'):
     raise ValueError('WECFU_SAM_DEVICE must explicitly select mps or cpu')
 SAM_SOURCE = MODEL_HOME/'sam2/source'

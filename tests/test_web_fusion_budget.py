@@ -79,5 +79,5 @@ def test_api_rejects_retired_v2_route_before_inference(web,expected,tmp_path,mon
         raw=upload(client);state=initialized(client)
         monkeypatch.setattr(server,'time',SimpleNamespace(monotonic=lambda:100.,perf_counter=time.perf_counter))
         response=client.post(BASE+'/model-preview',json={**preview_request(state,raw),'engine':fusion.ENGINE})
-        assert response.status_code==409 and 'without DINO' in response.json()['detail']
+        assert response.status_code==409 and 'Select Ultra, Lite or Custom' in response.json()['detail']
     assert observed==[]

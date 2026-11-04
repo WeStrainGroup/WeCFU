@@ -1,4 +1,4 @@
-"""Synthetic unified-import Web integrations with model-free defaults."""
+"""Synthetic protected Lite integrations for the shared Web workspace."""
 from fastapi.testclient import TestClient
 
 import wecfu.server.app as server
@@ -21,15 +21,16 @@ def test_web_builtin_default_and_repeat_protection(tmp_path, monkeypatch):
     with TestClient(application, base_url='https://testserver') as client:
         raw = upload(client, view='unknown'); state = initialized(client)
         cfg = client.get('/api/config').json()
-        assert cfg['default_count_engine'] == 'baseline' and cfg['default_model'] is None
-        assert cfg['refinement_model'] == server.sam_runtime.ENGINE
+        assert cfg['default_count_engine'] == server._COMPONENT_ENGINE
+        assert cfg['default_model'] == server.sam_runtime.ENGINE
+        assert 'refinement_model' not in cfg
         response = run_request(client, state, raw, engine=cfg['default_count_engine'])
         assert response.status_code == 200, response.text
         applied = response.json()
-        assert applied['count_engine'] == 'baseline' and applied['counted'] is True
+        assert applied['count_engine'] == server._COMPONENT_ENGINE and applied['counted'] is True
         assert run_request(client, applied, raw, engine='baseline').status_code == 409
         assert client.get(BASE+'/detections').json() == applied
-        assert run_request(client, state, raw, engine=server._COMPONENT_ENGINE).status_code == 403
+        assert run_request(client, state, raw, engine=server._COMPONENT_ENGINE).status_code == 409
 
 
 def test_web_classical_results_are_session_isolated(tmp_path, monkeypatch):

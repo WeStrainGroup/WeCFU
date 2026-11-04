@@ -1,4 +1,4 @@
-"""Synthetic endpoint coverage for the local edge default; no model/photo inputs."""
+"""Synthetic endpoint coverage for shared edge defaults; no model/photo inputs."""
 import json
 
 import pytest
@@ -58,17 +58,26 @@ def test_existing_saved_inset_is_not_rewritten_on_initialize(app):
         assert path.read_bytes() == before
 
 
-def test_web_config_initialize_and_classical_default_remain_unchanged(tmp_path, monkeypatch):
+def test_web_config_initialize_and_lite_share_local_defaults(tmp_path, monkeypatch):
     monkeypatch.setattr(server, 'detect_plate', lambda pixels: server.PlateCircle(60,50,40))
     monkeypatch.setattr('wecfu.pipeline.detect_plate', lambda pixels: server.PlateCircle(60,50,40))
     application = build_web_app(tmp_path/'sessions')
+    for method in ('predict_sam', 'predict_fusion', 'predict'):
+        monkeypatch.setattr(application.state.model_preview_manager, method,
+                            lambda *a, **k: pytest.fail('Lite must never invoke a model'))
     with TestClient(application, base_url='https://testserver') as client:
         config = client.get('/api/config').json()
-        assert config['default_params']['plate_inset'] == .82
-        assert config['default_model'] is None and config['default_count_engine'] == 'baseline'
+        assert config['default_params']['plate_inset'] == .95
+        assert config['default_params'] == server._INTERNAL_DEFAULT_PARAMS
+        assert config['default_model'] == sam_runtime.ENGINE
+        assert config['default_count_engine'] == server._COMPONENT_ENGINE
         raw = upload(client); state = initialized(client)
-        assert state['params']['plate_inset'] == .82
-        response = client.post(BASE+'/run', params={'engine':'baseline',
+        assert {key:state['params'][key] for key in config['default_params']} == config['default_params']
+        response = client.post(BASE+'/run', params={'engine':server._COMPONENT_ENGINE,
             'expected_revision':state['revision'], 'expected_image_sha256':sha(raw)})
         assert response.status_code == 200
-        assert response.json()['count_params']['plate_inset'] == .82
+        assert response.json()['count_engine'] == server._COMPONENT_ENGINE
+        assert response.json()['count_model'] is None
+        assert response.json()['count_params']['plate_inset'] == .95
+        assert response.json()['count_params']['min_value'] == 200
+        assert response.json()['count_params']['max_saturation'] == 100

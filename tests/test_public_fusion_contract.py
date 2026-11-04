@@ -233,7 +233,13 @@ def test_default_capability_and_busy_guard_never_load_models(app, monkeypatch, t
     with TestClient(application) as client:
         cfg = client.get('/api/config').json()
         assert cfg['default_count_engine'] == server._COMPONENT_ENGINE and cfg['default_model'] == server.sam_runtime.ENGINE
-        assert cfg['refinement_model'] == server.sam_runtime.ENGINE
+        assert 'refinement_model' not in cfg
+        assert cfg['recognition_policy_version'] == 'unified-ultra-lite-custom-v2'
+        assert cfg['recognition_policy'] == {
+            'default_engine':server.sam_runtime.ENGINE,
+            'default_stages':['classical_seed_preparation','sam_segmentation','fixed_postprocessing'],
+            'batch_scope':'unrecognized_only', 'automatic_fallback':False,
+        }
         assert cfg['default_model_fallback'] is False and cfg['internal'] is False
         assert cfg['models']['fusion_v2']['available'] is False
         assert cfg['models']['fusion_v2']['fallback'] is False

@@ -32,6 +32,7 @@ function ui() {
   };
   const context = vm.createContext({window: {WECFU_MODEL_PREVIEW_CONTROLS: helpers, WECFU_PARAM_CONTROLS: params,
     WECFU_REFERENCE_CONTROLS: reference, WECFU_WORKFLOW_CONTROLS: workflow,
+    WECFU_DEFAULT_BATCH: require('../wecfu/server/static/default_batch.js'),
     WECFU_REVIEW_QUEUE_CONTROLS: require('../wecfu/server/static/review_queue_controls.js'),
     WECFU_I18N: {t: key => key, getLang: () => 'en'}, addEventListener() {}},
     document: {getElementById: element}, console, AbortController, crypto: webcrypto,
@@ -667,7 +668,7 @@ function fusionV2UI({web = false, sourceView = 'main'} = {}) {
         model_sha256: 'c'.repeat(64), recipe_id: modelHelpers.SAM_RECIPE}}};
     state.doc.plate_manual = false; state.doc.reviewed = false; state.sourceView = fixtureView;
     state.imageList = [{name: state.imageName, counted: true}];
-    state.workflow.enabled = true; state.workflow.kind = 'default';
+    state.workflow.enabled = true; state.workflow.kind = 'classical';
     syncWorkflowRoute(); updateControls();`);
   return view;
 }
@@ -818,13 +819,14 @@ function publicSamUI(options={}) {
   return view;
 }
 
-test('refinement pins SAM through preview and adoption; default returns to builtin and saved provenance stays SAM', async()=>{
+test('Ultra pins SAM through preview and adoption while preserving Undo', async()=>{
   const view=publicSamUI(), before=plain(view.run('snapshot()'));
-  assert.equal(view.element('method-select').value,'component_watershed_v1');
-  await view.run('refineCurrent()');
+  view.run("state.workflow.kind='default'; syncWorkflowRoute(); updateControls();");
+  assert.equal(view.element('method-select').value,helpers.SAM_ENGINE);
+  await view.run('recognizeCurrent()');
   assert.equal(view.run('state.modelPreview.engine'),helpers.SAM_ENGINE);
   assert.equal(view.run('modelCandidateCurrent()'),true);
-  for(const id of ['btn-recognize-all','btn-recognize-current','btn-refine-current'])
+  for(const id of ['btn-recognize-all','btn-recognize-current'])
     assert.equal(view.element(id).disabled,true);
   view.run('syncWorkflowRoute(); updateControls();');
   assert.equal(view.run('selectedModelEngine()'),helpers.SAM_ENGINE);
@@ -832,51 +834,51 @@ test('refinement pins SAM through preview and adoption; default returns to built
     machine_count_initial:1,count_engine:SAM_ENGINE,count_model:{recipe_id:modelHelpers.SAM_RECIPE},count_params:null});`);
   await view.run('applyModelPreview()');
   assert.equal(view.run('state.modelPreview.engine'),null);
-  assert.equal(view.run('selectedModelEngine()'),null);
-  assert.equal(view.element('method-select').value,'component_watershed_v1');
+  assert.equal(view.run('selectedModelEngine()'),helpers.SAM_ENGINE);
+  assert.equal(view.element('method-select').value,helpers.SAM_ENGINE);
   assert.equal(view.run('state.doc.count_engine'),helpers.SAM_ENGINE);
   assert.equal(view.element('saved-source-visible').textContent,'currentSavedSourcesamSavedSource');
   assert.equal(view.element('btn-recognize-all').disabled,false);
   view.run('undo()'); assert.deepEqual(plain(view.run('snapshot()')),before);
 });
 
-test('discarding SAM refinement or failed preview returns to pure algorithm without changing saved work', async()=>{
+test('discarding a failed Ultra preview preserves the selected route and saved work', async()=>{
   const view=publicSamUI(),before=plain(view.run('snapshot()'));
-  await view.run('refineCurrent()'); view.run('clearModelPreview(); updateControls();');
-  assert.equal(view.run('selectedModelEngine()'),null);
-  assert.equal(view.element('btn-recognize-all').disabled,false);
-  view.run(`request=async()=>{throw Error('synthetic refinement failure');};`);
-  await view.run('refineCurrent()');
+  view.run("state.workflow.kind='default'; syncWorkflowRoute(); updateControls();");
+  await view.run('recognizeCurrent()'); view.run('clearModelPreview(); updateControls();');
   assert.equal(view.run('selectedModelEngine()'),helpers.SAM_ENGINE);
-  assert.match(view.element('model-message').textContent,/synthetic refinement failure/);
+  assert.equal(view.element('btn-recognize-all').disabled,false);
+  view.run(`request=async()=>{throw Error('synthetic Ultra failure');};`);
+  await view.run('recognizeCurrent()');
+  assert.equal(view.run('selectedModelEngine()'),helpers.SAM_ENGINE);
+  assert.match(view.element('model-message').textContent,/synthetic Ultra failure/);
   assert.equal(view.element('btn-model-discard').hidden,false);
   assert.equal(view.element('btn-recognize-all').disabled,true);
   view.run('clearModelPreview();updateControls();');
-  assert.equal(view.element('method-select').value,'component_watershed_v1');
+  assert.equal(view.element('method-select').value,helpers.SAM_ENGINE);
   assert.equal(view.element('btn-recognize-current').disabled,false);
   assert.deepEqual(plain(view.run('snapshot()')),before);
   assert.equal(view.run('saves.length'),0);
 });
 
-test('unavailable SAM disables only refinement and cannot fall back to Fusion', async()=>{
+test('unavailable Ultra never falls back to Fusion or Lite', async()=>{
   const view=publicSamUI(),before=plain(view.run('snapshot()'));
-  view.run('state.config.models.sam2.available=false;updateControls();');
-  assert.equal(view.element('btn-recognize-current').disabled,false);
-  assert.equal(view.element('btn-recognize-all').disabled,false);
-  assert.equal(view.element('btn-refine-current').disabled,true);
-  await view.run('refineCurrent()');
+  view.run("state.workflow.kind='default'; state.config.models.sam2.available=false; syncWorkflowRoute(); updateControls();");
+  assert.equal(view.element('btn-recognize-current').disabled,true);
+  assert.equal(view.element('btn-recognize-all').disabled,true);
+  await view.run('recognizeCurrent()');
   assert.equal(view.run('requests.length'),0);
-  assert.equal(view.run('selectedModelEngine()'),null);
+  assert.equal(view.run('selectedModelEngine()'),helpers.SAM_ENGINE);
   assert.deepEqual(plain(view.run('snapshot()')),before);
 });
 
-test('explicit detailed check runs algorithm plus SAM for all photo metadata and manual circles without DINO', async()=>{
-  for(const sourceView of ['main','blank','back','unknown']) {
-    const view=publicSamUI({sourceView}),before=plain(view.run('snapshot()'));
-    view.run('state.doc.plate_manual=true;updateControls();');
+test('Ultra uses SAM for all photo metadata and manual circles on local and web hosts', async()=>{
+  for(const web of [false,true]) for(const sourceView of ['main','blank','back','unknown']) {
+    const view=publicSamUI({sourceView,web});
+    view.run("state.workflow.kind='default'; state.doc.plate_manual=true;syncWorkflowRoute();updateControls();");
     const beforeWithPlate=plain(view.run('snapshot()'));
-    assert.equal(view.element('btn-refine-current').disabled,false);
-    await view.run('refineCurrent()');
+    assert.equal(view.element('btn-recognize-current').disabled,false);
+    await view.run('recognizeCurrent()');
     assert.equal(view.run('modelCandidateCurrent()'),true,sourceView);
     assert.equal(view.run('requests.length'),1);
     assert.deepEqual(JSON.parse(view.run('requests[0].options.body')),{

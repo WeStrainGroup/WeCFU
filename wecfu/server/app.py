@@ -659,11 +659,11 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
     app.state.model_preview_manager = preview_manager
 
     def default_params() -> SegmentParams:
-        return SegmentParams() if web_mode else SegmentParams(**_INTERNAL_DEFAULT_PARAMS)
+        return SegmentParams(**_INTERNAL_DEFAULT_PARAMS)
 
     def require_builtin_engine(engine: str) -> None:
-        if web_mode and engine != "baseline":
-            raise HTTPException(403, "The component counting engine is available only in the local internal app.")
+        if engine not in ("baseline", _COMPONENT_ENGINE):
+            raise HTTPException(422, "Unknown counting engine.")
 
     def run_params(body: Optional[ParamsBody], engine: str) -> SegmentParams:
         if engine == _COMPONENT_ENGINE:
@@ -675,28 +675,22 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
 
     @app.get("/api/config")
     def get_config():
-        sam_capability = {**preview_manager.sam.capability(), "default_model": not web_mode}
+        sam_capability = {**preview_manager.sam.capability(), "default_model": True}
         fusion_v2_capability = {**preview_manager.fusion_v2.capability(), "default_model": False}
         return {"web_mode": web_mode, "internal": False,
                 "max_images": WEB_MAX_IMAGES if web_mode else None,
                 "max_bytes": WEB_MAX_BYTES if web_mode else None,
-                "builtin_algorithms": ["baseline"] if web_mode else ["baseline", _COMPONENT_ENGINE],
-                "default_count_engine": "baseline" if web_mode else _COMPONENT_ENGINE,
+                "builtin_algorithms": ["baseline", _COMPONENT_ENGINE],
+                "default_count_engine": _COMPONENT_ENGINE,
                 # Preserve the user's default intent even when its runtime is
                 # unavailable. The client must report that, never silently fall
                 # back to the separately selectable classical engine.
-                "default_model": None if web_mode else sam_runtime.ENGINE,
-                "refinement_model": sam_runtime.ENGINE,
-                "recognition_policy_version": ("classical-default-explicit-sam-v1" if web_mode
-                                               else "sam-default-explicit-classical-v1"),
+                "default_model": sam_runtime.ENGINE,
+                "recognition_policy_version": "unified-ultra-lite-custom-v2",
                 "recognition_policy": {
-                    "default_engine": "baseline" if web_mode else sam_runtime.ENGINE,
-                    "default_stages": (["classical_segmentation"] if web_mode else
-                                       ["classical_seed_preparation", "sam_segmentation", "fixed_postprocessing"]),
+                    "default_engine": sam_runtime.ENGINE,
+                    "default_stages": ["classical_seed_preparation", "sam_segmentation", "fixed_postprocessing"],
                     "batch_scope": "unrecognized_only",
-                    "refinement_engine": sam_runtime.ENGINE,
-                    "refinement_scope": "current_image_explicit",
-                    "automatic_refinement": False,
                     "automatic_fallback": False,
                 },
                 "default_model_fallback": False,
@@ -1095,10 +1089,10 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
 
     @app.post("/api/batch/{batch}/image/{name}/model-preview")
     def create_model_preview(batch: str, name: str, body: ModelPreviewBody):
-        if body.only_unrecognized and (web_mode or body.engine != sam_runtime.ENGINE):
-            raise HTTPException(409, "Model batch recognition supports only local SAM. Reload the page before continuing; no fallback was run.")
+        if body.only_unrecognized and body.engine != sam_runtime.ENGINE:
+            raise HTTPException(409, "Ultra batch recognition requires SAM. Reload the page before continuing; no fallback was run.")
         if body.engine in _FUSION_ENGINES:
-            raise HTTPException(409, "Fine refinement now uses SAM without DINO. Reload the page before continuing; saved Fusion results are preserved.")
+            raise HTTPException(409, "This saved recognition method is no longer available. Select Ultra, Lite or Custom; existing results are preserved.")
         require_preview_enabled(body.engine)
         root = get_root()
         started = time.perf_counter()
@@ -1221,9 +1215,9 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
             record = preview_call(preview_manager.candidate, body.candidate_id, (str(root.resolve()), batch, name))
             candidate = record["result"]
             if candidate["engine"] in _FUSION_ENGINES:
-                raise HTTPException(409, "Fine refinement now uses SAM without DINO. Reload the page before continuing; saved Fusion results are preserved.")
-            if body.only_unrecognized and (web_mode or candidate["engine"] != sam_runtime.ENGINE):
-                raise HTTPException(409, "Model batch recognition supports only local SAM. Reload the page before continuing; no fallback was run.")
+                raise HTTPException(409, "This saved recognition method is no longer available. Select Ultra, Lite or Custom; existing results are preserved.")
+            if body.only_unrecognized and candidate["engine"] != sam_runtime.ENGINE:
+                raise HTTPException(409, "Ultra batch recognition requires SAM. Reload the page before continuing; no fallback was run.")
             if bool(record.get("only_unrecognized", False)) != body.only_unrecognized:
                 raise HTTPException(409, "Model preview batch intent changed. Reload the page and request a matching preview before adoption.")
             if body.only_unrecognized:
@@ -1430,7 +1424,7 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
 
     @app.put("/api/batch/{batch}/image/{name}/state")
     def replace_state(batch: str, name: str, body: StateBody):
-        if web_mode and body.count_engine == _COMPONENT_ENGINE:
+        if body.count_engine == _COMPONENT_ENGINE:
             require_builtin_engine(body.count_engine)
         root = get_root()
         with _lock(root, batch, name):

@@ -79,8 +79,8 @@ function normalWorkflow() { return state.workflow.enabled && !reviewMode(); }
 function customWorkflow() { return normalWorkflow() && state.workflow.kind === 'custom'; }
 function workflowBuiltinEngine() { return builtinEngines().includes(ENHANCED_ENGINE) ? ENHANCED_ENGINE : defaultBuiltinEngine(); }
 function workflowDefaultEngine() {
-  return state.workflow.kind !== 'classical' && !state.config?.web_mode && state.config?.default_model === SAM_ENGINE
-    ? SAM_ENGINE : workflowBuiltinEngine();
+  // Profile labels have one meaning on every host; missing SAM must never masquerade as Lite.
+  return state.workflow.kind === 'classical' ? workflowBuiltinEngine() : SAM_ENGINE;
 }
 function syncWorkflowRoute() {
   if (!normalWorkflow()) return;
@@ -151,7 +151,6 @@ function validateReviewState(doc) {
 }
 function reviewBlocked() { return reviewMode() && (state.review.loading || state.review.error || !state.review.queue); }
 function builtinEngines() {
-  if (state.config?.web_mode) return ['baseline'];
   const supplied = state.config?.builtin_algorithms;
   return Array.isArray(supplied) && supplied.includes(ENHANCED_ENGINE) ? ['baseline', ENHANCED_ENGINE] : ['baseline'];
 }
@@ -399,9 +398,8 @@ function updateWorkflowControls() {
   const defaultCapability = modelCapability(SAM_ENGINE);
   const defaultUnavailable = defaultSam && (!defaultCapability.enabled || !defaultCapability.available);
   const locked = state.loading || state.busy || Boolean(state.crop) || applyPending() || reviewBlocked();
-  const offersSamDefault = !state.config?.web_mode && state.config?.default_model === SAM_ENGINE;
-  $('profile-option-default').textContent = t(offersSamDefault ? 'profileDefault' : 'profileClassical');
-  $('profile-option-classical').hidden = !offersSamDefault;
+  $('profile-option-default').textContent = t('profileDefault');
+  $('profile-option-classical').hidden = false;
   $('recognition-profile-control').hidden = !normal;
   $('recognition-profile').value = state.workflow.kind;
   $('recognition-profile').disabled = locked || previewActive();
@@ -420,10 +418,6 @@ function updateWorkflowControls() {
   if (custom) $('btn-apply-params').disabled = locked || previewActive();
   $('btn-recognize-current').hidden = !normal;
   $('btn-recognize-current').disabled = !editable() || previewActive() || state.doc?.mode === 'manual' || defaultUnavailable;
-  const refineCapability = modelCapability(SAM_ENGINE);
-  $('btn-refine-current').hidden = !normal || custom || defaultSam;
-  $('btn-refine-current').disabled = !editable() || previewActive() || state.doc?.mode === 'manual'
-    || !refineCapability.enabled || !refineCapability.available;
   $('recognition-route').hidden = true;
   $('recognition-mode-info').hidden = !normal;
   $('mode-info-title').textContent = t(custom ? 'profileCustom' : defaultSam ? 'profileDefault' : 'profileClassical');
@@ -433,7 +427,6 @@ function updateWorkflowControls() {
   $('saved-source-visible').hidden = !normal || !state.doc?.counted;
   $('saved-source-visible').textContent = state.doc?.counted
     ? `${t('currentSavedSource')}${$('count-source').textContent}` : '';
-  $('btn-refine-current').title = t('refineCurrentHint');
   $('btn-custom-run-all').hidden = true;
   $('btn-custom-run-all').disabled = !custom || locked || !state.imageList.length || $('mode-select').value === 'manual';
   $('mode-hint').hidden = normal && (state.doc?.mode || $('mode-select').value) !== 'manual';
@@ -495,10 +488,6 @@ async function recognizeCurrent() {
     return runModelPreview({engine: SAM_ENGINE});
   }
   return recount();
-}
-async function refineCurrent() {
-  if (!normalWorkflow() || customWorkflow() || !editable() || previewActive() || state.doc.mode === 'manual') return;
-  return runModelPreview({engine: SAM_ENGINE});
 }
 function syncSliders() {
   let outside = false;
@@ -1994,7 +1983,6 @@ function wireUpHandlers() {
   };
   if (state.workflow.enabled) {
     actions['btn-recognize-current'] = recognizeCurrent;
-    actions['btn-refine-current'] = refineCurrent;
     actions['btn-custom-run-all'] = countAll;
     $('recognition-profile').addEventListener('change', safeAction(event => { changeRecognitionProfile(); focusAfterSelect(event.currentTarget || $('recognition-profile')); }));
   }
@@ -2087,7 +2075,7 @@ function wireUpHandlers() {
 async function applyServerConfig() {
   const config = await jsonRequest('/api/config'); state.config = config;
   const configDefaults = config.default_params;
-  const fallback = config.web_mode || !builtinEngines().includes(ENHANCED_ENGINE) ? LEGACY_DEFAULTS : DEFAULTS;
+  const fallback = !builtinEngines().includes(ENHANCED_ENGINE) ? LEGACY_DEFAULTS : DEFAULTS;
   for (const key of Object.keys(DEFAULTS)) DEFAULTS[key] = Number.isFinite(configDefaults?.[key]) ? configDefaults[key] : fallback[key];
   PRESETS.white = {...DEFAULTS};
   state.workflow.customParams ||= {...DEFAULTS};

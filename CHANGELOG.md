@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.2
+
+- Use the same Ultra, Lite and Custom mode selection locally and on the hosted
+  app, with Ultra selected by default. Remove the separate Detailed check action.
+- Prepare the fixed SAM runtime automatically on first local startup on macOS
+  and Linux, using an isolated cached environment. Download only SAM assets by
+  default; retain the full legacy asset profile as an explicit option.
+- Require Python 3.12. Windows continues to support Lite, Custom and manual
+  marking; Ultra remains unavailable there.
+- Start a fresh local session by default and clean it up when the server stops.
+  Browser refresh keeps the current session; an explicit `--root` retains a
+  persistent workspace. Original photographs and older workspaces are untouched.
+- Open in English initially and remember a supported language choice. Replace
+  Japanese and Spanish with Russian; retain English, Chinese and French. Update
+  Help for the current recognition, session and export workflows.
+
 ## 1.2.1
 
 - Ultra is the local algorithm + SAM workflow; Lite keeps the improved classical algorithm.

@@ -1,5 +1,5 @@
 {% set name = "wecfu" %}
-{% set version = "1.2.1" %}
+{% set version = "1.2.2" %}
 
 package:
   name: {{ name|lower }}
@@ -23,12 +23,12 @@ build:
 
 requirements:
   host:
-    - python >=3.10
+    - python >=3.12,<3.13
     - pip
     - setuptools >=68
     - wheel
   run:
-    - python >=3.10
+    - python >=3.12,<3.13
     - numpy
     - scipy
     - scikit-image
@@ -60,8 +60,8 @@ about:
     WeCFU is a local web tool for counting colonies on petri-dish photos.
     Review plate photos, correct colony markers, and export CSV or ZIP.
     The noarch package includes the interface and classical methods.
-    Ultra uses the separately installed, pinned SAM model runtime and
-    verified model cache; see INSTALL.md. It never silently substitutes
+    Ultra uses the automatically prepared, isolated SAM runtime and verified model cache
+    on macOS and Linux; see INSTALL.md. It never silently substitutes
     a classical result when a selected model is unavailable.
 
 extra:
