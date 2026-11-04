@@ -76,7 +76,7 @@ def test_default_starts_isolated_sessions_without_touching_old_workspaces(
     assert (orphan / "keep.json").read_text() == "not owned by this process"
 
 
-@pytest.mark.parametrize("failure", [RuntimeError, KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("failure", [RuntimeError, SystemExit])
 def test_temporary_session_cleans_up_when_server_raises(
     local_session, monkeypatch, failure
 ):
@@ -87,6 +87,17 @@ def test_temporary_session_cleans_up_when_server_raises(
     stub_server_run(monkeypatch, fail)
     with pytest.raises(failure, match="synthetic server exit"):
         cli._cmd_serve(local_session.args)
+    assert len(local_session.roots) == 1
+    assert not local_session.roots[0].exists()
+
+
+def test_user_interrupt_returns_zero_and_cleans_temporary_session(local_session, monkeypatch):
+    def interrupted(app, **kwargs):
+        (app.get_root() / "runs" / "partial.json").write_text("temporary session")
+        raise KeyboardInterrupt
+
+    stub_server_run(monkeypatch, interrupted)
+    assert cli._cmd_serve(local_session.args) == 0
     assert len(local_session.roots) == 1
     assert not local_session.roots[0].exists()
 

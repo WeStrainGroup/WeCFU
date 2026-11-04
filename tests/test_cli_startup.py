@@ -2,8 +2,12 @@
 
 import argparse
 import asyncio
+import json
+import os
 import socket
+import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -154,6 +158,45 @@ def test_browser_exception_cannot_skip_server_lifespan_shutdown(launch, monkeypa
     assert cli._cmd_serve(args) == 0
     assert events == ['startup', 'shutdown'] and not roots[-1].exists()
     assert 'closing the server normally' in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX SIGINT lifecycle integration')
+def test_actual_sigint_exits_zero_without_traceback_and_cleans_workspace():
+    script = r'''
+import argparse, json, os, signal
+from wecfu import cli
+from wecfu.server import app as server
+roots, events = [], []
+def build_app(*, get_root, web_mode):
+    roots.append(get_root())
+    async def app(scope, receive, send):
+        assert scope['type'] == 'lifespan'
+        assert (await receive())['type'] == 'lifespan.startup'
+        events.append('startup')
+        await send({'type': 'lifespan.startup.complete'})
+        assert (await receive())['type'] == 'lifespan.shutdown'
+        events.append('shutdown')
+        await send({'type': 'lifespan.shutdown.complete'})
+    return app
+async def stop_after_binding(url):
+    assert '?launch=' in url
+    events.append('bound')
+    os.kill(os.getpid(), signal.SIGINT)
+server.build_app = build_app
+cli._open_browser = stop_after_binding
+code = cli._cmd_serve(argparse.Namespace(root=None, port=0, open=True, model_setup=False))
+print(json.dumps({'code': code, 'events': events, 'workspace_exists': roots[0].exists()}))
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', script], cwd=Path(cli.__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == {
+        'code': 0, 'events': ['startup', 'bound', 'shutdown'], 'workspace_exists': False,
+    }
+    assert 'Application shutdown complete' in result.stderr
+    assert 'Traceback' not in result.stderr and 'KeyboardInterrupt' not in result.stderr
 
 
 @pytest.mark.parametrize('cancel', [False, True])

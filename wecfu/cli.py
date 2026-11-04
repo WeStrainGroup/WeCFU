@@ -129,7 +129,12 @@ def _cmd_serve(args) -> int:
                     await super().shutdown(sockets=sockets)
 
         config = uvicorn.Config(app, host="127.0.0.1", port=args.port, log_level="info")
-        LocalServer(config).run()
+        try:
+            LocalServer(config).run()
+        except KeyboardInterrupt:
+            # Match uvicorn.run(): Ctrl-C is a normal local GUI exit. Keep this
+            # narrow so bind failures and application errors still propagate.
+            pass
     return 0
 
 
