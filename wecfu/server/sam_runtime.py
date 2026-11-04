@@ -21,6 +21,7 @@ import threading
 import time
 from . import runtime_diagnostics
 from wecfu import runtime_paths
+from wecfu.runtime_bootstrap import isolated_environment
 
 ENGINE = "sam2_local_v1"
 RECIPE_ID = "sam_cv_seed_area0.05_color160_edge095_v1"
@@ -204,7 +205,7 @@ class LocalSamProvider:
             runtime_key = (fingerprint(SAM_PYTHON), fingerprint(CV_PYTHON), SAM_DEVICE)
             if self._checked_runtime != runtime_key:
                 from wecfu.runtime_bootstrap import _probe
-                environment = {**os.environ, "PYTHONPATH":str(REPO), "PYTHONDONTWRITEBYTECODE":"1",
+                environment = {**isolated_environment(os.environ), "PYTHONDONTWRITEBYTECODE":"1",
                                "PYTHONNOUSERSITE":"1", "WECFU_SAM_DEVICE":SAM_DEVICE,
                                "HF_HUB_OFFLINE":"1", "TRANSFORMERS_OFFLINE":"1"}
                 try:
@@ -247,7 +248,7 @@ class LocalSamProvider:
             request = dict(engine=ENGINE, recipe_id=RECIPE_ID, image_sha256=image_sha256,
                            plate=asdict(plate), model_sha256=MODEL_SHA256)
             (folder / "request.json").write_text(json.dumps(request, allow_nan=False))
-            env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(REPO),
+            env = {**isolated_environment(os.environ), "PYTHONDONTWRITEBYTECODE": "1",
                    "PYTORCH_ENABLE_MPS_FALLBACK": "0", "HF_HUB_OFFLINE": "1",
                    "TRANSFORMERS_OFFLINE": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
                    "OPENBLAS_NUM_THREADS": "1", "VECLIB_MAXIMUM_THREADS": "1"}

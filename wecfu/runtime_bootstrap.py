@@ -50,7 +50,7 @@ def prepared_python(cache):
 
 def _run(command, *, env, timeout=1200):
     try:
-        result = subprocess.run(command, cwd=PACKAGE_ROOT.parent, env=env, stdin=subprocess.DEVNULL,
+        result = subprocess.run(command, cwd=PACKAGE_ROOT, env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -60,9 +60,24 @@ def _run(command, *, env, timeout=1200):
     return result.stdout
 
 
+def package_import_prelude():
+    """Expose this package, without exposing the application's site-packages."""
+    return f'''import importlib.util,sys
+_wecfu_spec=importlib.util.spec_from_file_location("wecfu", {str(PACKAGE_ROOT / '__init__.py')!r}, submodule_search_locations=[{str(PACKAGE_ROOT)!r}])
+_wecfu_module=importlib.util.module_from_spec(_wecfu_spec)
+sys.modules["wecfu"]=_wecfu_module
+_wecfu_spec.loader.exec_module(_wecfu_module)
+'''
+
+
+def isolated_environment(env):
+    return {**{k:v for k,v in env.items() if k not in ('PYTHONHOME', 'PYTHONPATH')},
+            'PYTHONPATH':'', 'PYTHONNOUSERSITE':'1', 'PYTHONDONTWRITEBYTECODE':'1'}
+
+
 def _probe(python, cache, *, env):
     """Verify real imports, pinned versions, source and device in the target env."""
-    code = """import json,os,sys
+    code = package_import_prelude() + """import json,os,sys
 from wecfu.runtime_paths import check_versions,verify_sam_source,SAM_SOURCE
 from wecfu.runtime_bootstrap import REQUIREMENTS
 from importlib.metadata import version
@@ -79,7 +94,7 @@ if device not in ('cpu','mps') or (device=='mps' and not torch.backends.mps.is_a
 print(json.dumps({'versions':versions,'device':device,'python':sys.executable}))
 """
     output = _run([str(python), '-B', '-c', code],
-                  env={**env, 'WECFU_MODEL_HOME':str(cache)}, timeout=90)
+                  env={**isolated_environment(env), 'WECFU_MODEL_HOME':str(cache)}, timeout=90)
     try:
         return json.loads(output.strip().splitlines()[-1])
     except (ValueError, IndexError) as exc:
@@ -123,8 +138,7 @@ def _ensure_ultra():
         return {'status':'disabled'}
     from . import runtime_paths, setup_models
     cache = runtime_paths.MODEL_HOME
-    env = {**{k:v for k,v in os.environ.items() if k != 'PYTHONHOME'}, 'PYTHONPATH':str(PACKAGE_ROOT.parent),
-           'PYTHONDONTWRITEBYTECODE':'1', 'PYTHONNOUSERSITE':'1'}
+    env = isolated_environment(os.environ)
     external = os.environ.get('WECFU_MODEL_PYTHON')
     folder = runtime_directory(cache)
     python = Path(external).expanduser().absolute() if external else folder/'bin/python'

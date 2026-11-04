@@ -88,6 +88,8 @@ def test_bootstrap_requirements_match_model_extra():
 @pytest.mark.parametrize('wrong_package', [None, *[value.split('==', 1)[0] for value in bootstrap.REQUIREMENTS]])
 def test_probe_checks_every_pinned_package_using_synthetic_modules(monkeypatch, tmp_path, wrong_package):
     """Execute the actual generated probe, with fake modules instead of ML imports."""
+    # Package binding is covered with real isolated subprocesses separately.
+    monkeypatch.setattr(bootstrap, 'package_import_prelude', lambda: '')
     expected = {normalize_distribution(name): value for name, value in
                 (item.split('==', 1) for item in bootstrap.REQUIREMENTS)}
     checked = []
@@ -414,4 +416,4 @@ def test_subprocess_uses_application_directory_instead_of_callers_working_direct
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(bootstrap.subprocess, 'run', run)
     assert bootstrap._run(['synthetic-python'], env={}) == 'synthetic ok'
-    assert seen[0]['cwd'] == bootstrap.PACKAGE_ROOT.parent
+    assert seen[0]['cwd'] == bootstrap.PACKAGE_ROOT

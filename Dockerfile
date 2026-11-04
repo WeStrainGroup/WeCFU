@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -u 1000 user
 USER user
 ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH \
+    PATH=/home/user/runtime/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     WECFU_SESSIONS_ROOT=/tmp/wecfu_sessions \
@@ -27,10 +27,11 @@ COPY --chown=user pyproject.toml README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md
 COPY --chown=user LICENSES/ ./LICENSES/
 COPY --chown=user wecfu/ ./wecfu/
 
-RUN python -m pip install --user --no-cache-dir \
+RUN /usr/local/bin/python -m venv /home/user/runtime \
+    && python -m pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cpu \
         torch==2.14.1 torchvision==0.29.1 \
-    && python -m pip install --user --no-cache-dir '.[models]' \
+    && python -m pip install --no-cache-dir '.[models]' \
     && python -m wecfu.setup_models \
     && python -m wecfu.setup_models --check --runtime-check
 

@@ -148,14 +148,14 @@ def check(cache, *, profile="sam"):
 
 def runtime_check(cache, *, profile="sam"):
     """Check the configured model interpreter, without loading either model."""
+    from .runtime_bootstrap import _probe, isolated_environment, package_import_prelude
     if profile == "sam":
-        from .runtime_bootstrap import _probe
-        env = {**{k:v for k,v in os.environ.items() if k != 'PYTHONHOME'},
-               'PYTHONPATH':str(paths.PACKAGE_ROOT.parent),'PYTHONDONTWRITEBYTECODE':'1',
+        env = {**isolated_environment(os.environ),
+               'PYTHONDONTWRITEBYTECODE':'1',
                'PYTHONNOUSERSITE':'1','WECFU_SAM_DEVICE':paths.SAM_DEVICE,'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1'}
         result = _probe(paths.MODEL_PYTHON, cache, env=env)
         return {'status':'model_runtime_verified','models_loaded':False,**result}
-    command = """import json,sys,os
+    command = package_import_prelude() + """import json,sys,os
 if sys.platform not in ('darwin','linux'): raise RuntimeError('Ultra requires macOS or Linux')
 from wecfu.runtime_paths import check_versions,SAM_DEVICE,SAM_SOURCE,verify_sam_source
 versions=check_versions()
@@ -174,11 +174,11 @@ policy=json.loads((PACKAGE_ROOT/'server/fusion_dino/library-pins.json').read_tex
 resolve_library_policy(policy)
 verify_contract(digest(PACKAGE_ROOT/'server/fusion_dino/runtime-contract.json'))
 import torch,torchvision,numpy,PIL,hydra,omegaconf,iopath""")
-    env={**os.environ,'WECFU_MODEL_HOME':str(Path(cache).expanduser().resolve()),
-         'PYTHONPATH':str(paths.PACKAGE_ROOT.parent),'PYTHONDONTWRITEBYTECODE':'1',
+    env={**isolated_environment(os.environ),'WECFU_MODEL_HOME':str(Path(cache).expanduser().resolve()),
+         'PYTHONDONTWRITEBYTECODE':'1',
          'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1'}
     result=subprocess.run([str(paths.MODEL_PYTHON),'-B','-c',command],env=env,
-                          capture_output=True,text=True,timeout=30,check=False)
+                          cwd=paths.PACKAGE_ROOT,capture_output=True,text=True,timeout=30,check=False)
     if result.returncode:
         raise RuntimeError('Model runtime check failed: '+result.stderr[-4000:])
     return json.loads(result.stdout)
