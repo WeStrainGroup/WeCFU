@@ -107,12 +107,13 @@ for (const available of [true, false]) {
     v.run(`let finishConfig;
       const nextConfig = clone(state.config); nextConfig.models.sam2.available = configAvailable;
       delete state.config; updateControls();
-      jsonRequest = async (url) => {
+      request = async (url) => {
         calls.push({url});
         if (url !== '/api/config') throw Error('Unexpected request before configuration');
-        return new Promise(resolve => { finishConfig = resolve; });
+        return {json: () => new Promise(resolve => { finishConfig = resolve; })};
       };`);
     const pending = v.run('applyServerConfig()');
+    await Promise.resolve();
     assert.equal(v.element('batch-hint').hidden, true);
     assert.equal(v.element('batch-hint').textContent, '');
     assert.equal(v.element('model-tools').hidden, true);
@@ -139,7 +140,7 @@ test('a failed initial configuration reports the request failure without claimin
   const v = ui(); samDefault(v);
   v.run(`let failConfig;
     delete state.config; updateControls();
-    jsonRequest = async (url) => {
+    request = async (url) => {
       calls.push({url});
       return new Promise((_, reject) => { failConfig = reject; });
     };`);
@@ -156,6 +157,91 @@ test('a failed initial configuration reports the request failure without claimin
   assert.equal(v.errors.length, 1);
   assert.equal(v.run('saves.length'), 0);
   assert.deepEqual(plain(v.run('calls')), [{url:'/api/config'}]);
+});
+
+test('startup configuration recovers from bounded transient failures using only uncached GETs', async () => {
+  const v = ui(); samDefault(v);
+  v.run(`const readyConfig=clone(state.config); delete state.config; updateControls();
+    request = async (url, options) => {
+      calls.push({url,method:options.method,cache:options.cache,hasSignal:!!options.signal});
+      if (calls.length === 1) throw TypeError('synthetic connection refused');
+      if (calls.length === 2) throw Object.assign(Error('synthetic startup unavailable'), {status:503});
+      return {json:async()=>readyConfig};
+    };`);
+  await v.run('applyServerConfig()');
+  assert.deepEqual(plain(v.run('calls')), Array.from({length:3}, () => ({
+    url:'/api/config',method:'GET',cache:'no-store',hasSignal:true,
+  })));
+  assert.equal(v.element('btn-recognize-current').disabled, false);
+  assert.equal(v.element('batch-hint').hidden, true);
+  assert.equal(v.element('status').textContent, '');
+  assert.equal(v.run('saves.length'), 0);
+  assert.deepEqual(v.errors, []);
+});
+
+test('startup network failure stops after three GETs and preserves disabled state and saved work', async () => {
+  const v = ui(); samDefault(v);
+  const before = plain(v.run('snapshot()'));
+  v.run(`delete state.config; updateControls();
+    request = async (url,options) => {
+      calls.push({url,method:options.method,cache:options.cache});
+      throw TypeError('synthetic persistent network failure');
+    };`);
+  await v.run('applyServerConfig().catch(handleError)');
+  assert.equal(v.run('calls.length'), 3);
+  assert.equal(v.element('status').textContent, 'actionFailed: synthetic persistent network failure');
+  assert.equal(v.element('btn-recognize-current').disabled, true);
+  assert.equal(v.element('btn-recognize-all').disabled, true);
+  assert.equal(v.element('batch-hint').hidden, true);
+  assert.equal(v.element('model-tools').hidden, true);
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  assert.equal(v.run('saves.length'), 0);
+  assert.equal(v.errors.length, 1);
+});
+
+test('a permanent configuration HTTP error is not retried', async () => {
+  const v = ui(); samDefault(v);
+  v.run(`delete state.config; updateControls();
+    request = async (url,options) => {
+      calls.push({url,method:options.method});
+      throw Object.assign(Error('synthetic forbidden configuration'), {status:403});
+    };`);
+  await v.run('applyServerConfig().catch(handleError)');
+  assert.equal(v.run('calls.length'), 1);
+  assert.equal(v.element('status').textContent, 'actionFailed: synthetic forbidden configuration');
+  assert.equal(v.element('btn-recognize-current').disabled, true);
+  assert.equal(v.run('saves.length'), 0);
+});
+
+test('each startup attempt has its own eight-second abort and an overall retry limit', async () => {
+  const v = ui(); samDefault(v);
+  const scheduled = [];
+  v.context.setTimeout = (callback, milliseconds) => {
+    scheduled.push(milliseconds); queueMicrotask(callback); return scheduled.length;
+  };
+  v.context.clearTimeout = () => {};
+  v.run(`delete state.config; updateControls();
+    request = async (url,options) => {
+      calls.push({url,method:options.method});
+      return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>{
+        reject(Object.assign(Error('synthetic startup timeout'), {name:'AbortError'}));
+      },{once:true}));
+    };`);
+  await v.run('applyServerConfig().catch(handleError)');
+  assert.deepEqual(scheduled, [8000,300,8000,900,8000]);
+  assert.equal(v.run('calls.length'), 3);
+  assert.equal(v.element('status').textContent, 'actionFailed: synthetic startup timeout');
+  assert.equal(v.element('btn-recognize-all').disabled, true);
+});
+
+test('ordinary write requests remain single-attempt after adding startup retries', async () => {
+  const v = ui();
+  const transport = [];
+  v.context.fetch = async (url,options) => {
+    transport.push({url,method:options.method}); throw new TypeError('synthetic lost write response');
+  };
+  await assert.rejects(v.run("request('/api/batch/synthetic/image/first.png/model-preview/apply', {method:'POST'})"), /synthetic lost write response/);
+  assert.deepEqual(transport, [{url:'/api/batch/synthetic/image/first.png/model-preview/apply',method:'POST'}]);
 });
 
 for (const button of ['btn-recognize-all', 'btn-run']) {

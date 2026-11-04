@@ -10,7 +10,7 @@ license: cc-by-nc-sa-4.0
 short_description: Count colonies, correct markers, export results
 ---
 
-# WeCFU 1.2.2
+# WeCFU 1.2.3
 
 Add plate photos, choose **Recognize all**, correct individual markers, and
 export counts as CSV or a bundle of annotated results.

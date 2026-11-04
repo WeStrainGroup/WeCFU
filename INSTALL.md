@@ -1,4 +1,4 @@
-# Install and run WeCFU 1.2.2
+# Install and run WeCFU 1.2.3
 
 ## Local installation
 
@@ -7,7 +7,7 @@ macOS CPU/MPS. Windows supports Lite, Custom and manual marking; Ultra is not
 supported there. CUDA is not a supported device setting.
 
 ```sh
-conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.2 -y
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.3 -y
 conda activate wecfu
 wecfu serve
 ```
@@ -55,7 +55,7 @@ a new package does not update an already running process.
 
 ```sh
 conda activate wecfu
-conda install -c westraingroup -c conda-forge python=3.12 wecfu=1.2.2 -y
+conda install -c westraingroup -c conda-forge python=3.12 wecfu=1.2.3 -y
 wecfu serve
 ```
 
@@ -100,7 +100,7 @@ Do not store photographs or results in the model cache.
 ```sh
 git clone https://github.com/WeStrainGroup/WeCFU.git
 cd WeCFU
-git checkout v1.2.2
+git checkout v1.2.3
 conda create -n wecfu-source -c conda-forge python=3.12 pip -y
 conda activate wecfu-source
 python -m pip install '.[dev]'

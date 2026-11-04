@@ -655,6 +655,17 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
             await asyncio.to_thread(POOL.shutdown)
 
     app = FastAPI(title="WeCFU", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def frontend_cache_policy(request, call_next):
+        response = await call_next(request)
+        # A new app process can serve a newer UI on the same localhost address.
+        # Never reuse the entry document; validate versioned assets, including 304s.
+        if request.url.path in ("/", "/static/index.html"):
+            response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
     preview_manager = model_preview.ModelPreviewManager(web_mode=web_mode)
     app.state.model_preview_manager = preview_manager
 

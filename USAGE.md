@@ -1,4 +1,4 @@
-# Using WeCFU 1.2.2
+# Using WeCFU 1.2.3
 
 For installation and model setup, see [INSTALL.md](INSTALL.md).
 

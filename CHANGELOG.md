@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.3
+
+- Open the browser only after this local server has successfully started. Use
+  a fresh launch URL so an earlier localhost page cannot mask an upgrade.
+- Disable entry-page caching and revalidate UI assets. Retry only transient
+  startup configuration reads; recognition and editing requests are not retried.
+- Keep the Ultra, Lite and Custom recognition methods and model settings unchanged.
+
 ## 1.2.2
 
 - Use the same Ultra, Lite and Custom mode selection locally and on the hosted

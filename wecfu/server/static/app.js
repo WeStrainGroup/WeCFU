@@ -2074,8 +2074,24 @@ function wireUpHandlers() {
     await uploadFiles(files);
   }));
 }
+async function readServerConfig() {
+  // Only this startup GET can retry. Recognition, adoption and edits stay single-attempt.
+  const delays = [0, 300, 900];
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]) await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      return await (await request('/api/config', {method: 'GET', cache: 'no-store', signal: controller.signal})).json();
+    } catch (error) {
+      const transient = error.name === 'TypeError' || error.name === 'AbortError'
+        || [502, 503, 504].includes(error.status);
+      if (!transient || attempt === delays.length - 1) throw error;
+    } finally { clearTimeout(timer); }
+  }
+}
 async function applyServerConfig() {
-  const config = await jsonRequest('/api/config'); state.config = config;
+  const config = await readServerConfig(); state.config = config;
   const configDefaults = config.default_params;
   const fallback = !builtinEngines().includes(ENHANCED_ENGINE) ? LEGACY_DEFAULTS : DEFAULTS;
   for (const key of Object.keys(DEFAULTS)) DEFAULTS[key] = Number.isFinite(configDefaults?.[key]) ? configDefaults[key] : fallback[key];

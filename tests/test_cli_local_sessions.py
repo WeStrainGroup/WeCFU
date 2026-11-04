@@ -11,6 +11,15 @@ from wecfu import cli
 from wecfu.server import app as server
 
 
+def stub_server_run(monkeypatch, callback):
+    def run(instance, sockets=None):
+        assert sockets is None
+        config = instance.config
+        return callback(config.app, host=config.host, port=config.port, log_level=config.log_level)
+
+    monkeypatch.setattr(uvicorn.Server, "run", run)
+
+
 @pytest.fixture
 def local_session(monkeypatch, tmp_path):
     temp_parent = tmp_path / "system-temp"
@@ -58,7 +67,7 @@ def test_default_starts_isolated_sessions_without_touching_old_workspaces(
         assert app.get_root() == root
         assert (app.get_root() / "runs" / "current.json").read_text() == "this session"
 
-    monkeypatch.setattr(uvicorn, "run", serve)
+    stub_server_run(monkeypatch, serve)
     for _ in range(2):
         assert cli._cmd_serve(local_session.args) == 0
         assert not local_session.roots[-1].exists()
@@ -75,7 +84,7 @@ def test_temporary_session_cleans_up_when_server_raises(
         (app.get_root() / "runs" / "partial.json").write_text("partial result")
         raise failure("synthetic server exit")
 
-    monkeypatch.setattr(uvicorn, "run", fail)
+    stub_server_run(monkeypatch, fail)
     with pytest.raises(failure, match="synthetic server exit"):
         cli._cmd_serve(local_session.args)
     assert len(local_session.roots) == 1
@@ -111,7 +120,7 @@ def test_cleanup_unlinks_imports_without_touching_original_files_or_directories(
         (inputs / "directory-link").symlink_to(originals, target_is_directory=True)
         (inputs / "uploaded-copy.txt").write_bytes(b"workspace copy")
 
-    monkeypatch.setattr(uvicorn, "run", serve)
+    stub_server_run(monkeypatch, serve)
     assert cli._cmd_serve(local_session.args) == 0
     assert not local_session.roots[0].exists()
     assert originals.is_dir()
@@ -136,7 +145,7 @@ def test_explicit_root_keeps_existing_and_new_results(
         if server_fails:
             raise RuntimeError("synthetic server exit")
 
-    monkeypatch.setattr(uvicorn, "run", serve)
+    stub_server_run(monkeypatch, serve)
     if server_fails:
         with pytest.raises(RuntimeError, match="server exit"):
             cli._cmd_serve(local_session.args)
@@ -183,7 +192,7 @@ def test_automatic_ultra_setup_precedes_app_creation_and_reports_failure(
 
     monkeypatch.setitem(sys.modules, "wecfu.runtime_bootstrap", SimpleNamespace(ensure_ultra=ensure_ultra))
     monkeypatch.setattr(server, "build_app", build_app)
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: events.append("serve"))
+    stub_server_run(monkeypatch, lambda app, **kwargs: events.append("serve"))
     local_session.args.model_setup = True
     assert cli._cmd_serve(local_session.args) == 0
     assert events == ["setup", "build", "serve"]
@@ -200,6 +209,6 @@ def test_explicit_offline_flag_never_runs_setup(local_session, monkeypatch):
         pytest.fail("offline launch must not attempt model setup")
 
     monkeypatch.setitem(sys.modules, "wecfu.runtime_bootstrap", SimpleNamespace(ensure_ultra=forbidden))
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: None)
+    stub_server_run(monkeypatch, lambda app, **kwargs: None)
     local_session.args.model_setup = False
     assert cli._cmd_serve(local_session.args) == 0

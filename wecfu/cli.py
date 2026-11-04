@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 import tempfile
-import webbrowser
+import uuid
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -14,6 +15,35 @@ from .pipeline import batch
 from .segment import SegmentParams
 
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+_BROWSER_OPEN_TIMEOUT = 5.0
+
+
+async def _open_browser(url: str) -> None:
+    """Keep an unresponsive OS browser launcher off the server's event loop."""
+    process = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-I", "-c",
+            "import sys, webbrowser; sys.exit(0 if webbrowser.open(sys.argv[1]) else 1)",
+            url,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        if await asyncio.wait_for(process.wait(), _BROWSER_OPEN_TIMEOUT):
+            print(f"Could not open a browser automatically. Open {url}", file=sys.stderr)
+    except (OSError, asyncio.TimeoutError):
+        print(f"Could not open a browser automatically. Open {url}", file=sys.stderr)
+    finally:
+        if process is not None and process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            # Bound cleanup too, including cancellation during server shutdown.
+            try:
+                await asyncio.wait_for(process.wait(), 1.0)
+            except asyncio.TimeoutError:
+                print("Browser launcher did not exit promptly.", file=sys.stderr)
 
 
 def _collect_images(input_path: Path) -> list[Path]:
@@ -68,13 +98,38 @@ def _cmd_serve(args) -> int:
         (root / "runs").mkdir(exist_ok=True)
 
         app = build_app(get_root=lambda: root, web_mode=False)
-        url = f"http://127.0.0.1:{args.port}"
-        if args.open:
-            webbrowser.open(url)
-        print(f"wecfu serving at {url}  (workspace: {root})")
-        if temporary:
-            print("Temporary session: export your results before stopping the server.")
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
+
+        class LocalServer(uvicorn.Server):
+            browser_task = None
+
+            async def startup(self, sockets=None):
+                await super().startup(sockets=sockets)
+                # This instance's lifespan and socket binding must both succeed.
+                # Never probe an existing HTTP service to decide readiness.
+                if not self.started or self.should_exit:
+                    return
+                port = self.servers[0].sockets[0].getsockname()[1]
+                url = f"http://127.0.0.1:{port}/?launch={uuid.uuid4().hex}"
+                print(f"wecfu serving at {url}  (workspace: {root})")
+                if temporary:
+                    print("Temporary session: export your results before stopping the server.")
+                if args.open:
+                    self.browser_task = asyncio.create_task(_open_browser(url))
+
+            async def shutdown(self, sockets=None):
+                try:
+                    if self.browser_task is not None:
+                        self.browser_task.cancel()
+                        await self.browser_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    print("Browser launcher failed; closing the server normally.", file=sys.stderr)
+                finally:
+                    await super().shutdown(sockets=sockets)
+
+        config = uvicorn.Config(app, host="127.0.0.1", port=args.port, log_level="info")
+        LocalServer(config).run()
     return 0
 
 
