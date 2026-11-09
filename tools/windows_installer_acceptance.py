@@ -25,6 +25,16 @@ MAX_MANIFEST = 16 * 1024**2
 UNINSTALL = r'Software\Microsoft\Windows\CurrentVersion\Uninstall'
 INSTALL_CHILD = 'import subprocess,sys\nraise SystemExit(subprocess.call(sys.argv[1],executable=sys.argv[2],stdin=subprocess.DEVNULL))\n'
 NSIS_DOC = 'https://nsis.sourceforge.io/Docs/Chapter3.html#3.2.1'
+TAURI_CLI_VERSION = '2.12.4'
+UNKNOWN_BUNDLE_MARKER = b'__TAURI_BUNDLE_TYPE_VAR_UNK'
+NSIS_BUNDLE_MARKER = b'__TAURI_BUNDLE_TYPE_VAR_NSS'
+MAX_SHELL_BYTES = 256 * 1024**2
+# Tauri patches this marker before packaging, then restores the build EXE.
+# Only this exact transformation is permitted; all installed bytes are hashed.
+TAURI_PATCH_SOURCE = {
+    'url': 'https://raw.githubusercontent.com/tauri-apps/tauri/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle.rs',
+    'sha256': '91c8387ccb2e52388cdcfeccfd23f69dac5439aba397d464b1d5446153fdc82e',
+}
 
 
 def require(condition, message):
@@ -47,6 +57,75 @@ def digest(path, deadline):
             check_time(deadline)
             value.update(block)
     return value.hexdigest()
+
+
+def check_bundler_version(repo):
+    lock_path = repo / 'desktop/package-lock.json'
+    cli_path = repo / 'desktop/node_modules/@tauri-apps/cli/package.json'
+    lock = json.loads(lock_path.read_text(encoding='utf-8'))
+    cli = json.loads(cli_path.read_text(encoding='utf-8'))
+    require(lock['packages']['node_modules/@tauri-apps/cli']['version'] == TAURI_CLI_VERSION
+            and cli['version'] == TAURI_CLI_VERSION, 'Unreviewed Tauri binary patching version')
+    return [lock_path, cli_path]
+
+
+def nsis_shell_identity(built, deadline):
+    """Derive the complete NSIS EXE hash without changing the build artifact."""
+    marker = UNKNOWN_BUNDLE_MARKER
+    require(len(marker) == len(NSIS_BUNDLE_MARKER) == 27, 'Invalid bundle marker contract')
+    size = built.stat().st_size
+    require(0 < size <= MAX_SHELL_BYTES, 'Build executable exceeds shell size budget')
+    original = hashlib.sha256()
+    offsets, carry, total = [], b'', 0
+    with built.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024**2), b''):
+            check_time(deadline)
+            require(total + len(block) <= size, 'Build executable changed while hashing')
+            original.update(block)
+            data = carry + block
+            start = 0
+            while (index := data.find(marker, start)) >= 0:
+                offsets.append(total - len(carry) + index)
+                require(len(offsets) <= 1, 'Duplicate build bundle marker')
+                start = index + 1
+            total += len(block)
+            carry = data[-(len(marker)-1):]
+    require(total == size and len(offsets) == 1, 'Missing build bundle marker or changed size')
+    offset = offsets[0]
+    expected, reread, total = hashlib.sha256(), hashlib.sha256(), 0
+    with built.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024**2), b''):
+            check_time(deadline)
+            require(total + len(block) <= size, 'Build executable changed while deriving NSIS hash')
+            reread.update(block)
+            left, right = max(total, offset), min(total + len(block), offset + len(marker))
+            if left < right:
+                block = block[:left-total] + NSIS_BUNDLE_MARKER[left-offset:right-offset] + block[right-total:]
+            expected.update(block)
+            total += len(block)
+    require(total == size and reread.digest() == original.digest(), 'Build executable changed during NSIS derivation')
+    return {'tauri_cli_version': TAURI_CLI_VERSION, 'source': TAURI_PATCH_SOURCE,
+            'marker_offset': offset, 'bytes': size, 'original_sha256': original.hexdigest(),
+            'expected_installed_sha256': expected.hexdigest(),
+            'transformation': 'one_27_byte_UNK_to_NSS_marker_only'}
+
+
+def verify_installed_shell(destination, built, identity, deadline, receipt):
+    # Record the root inventory BEFORE any EXE assertion, even for a wrong name.
+    whole = inventory(destination, deadline)
+    extras = {name: digest(path, deadline) for name, path in whole.items() if not name.startswith('bundle/')}
+    receipt['non_bundle_installed_files'] = extras
+    installed = destination / built.name
+    exists = built.name in whole
+    facts = {'path': str(installed), 'expected_basename': built.name, 'exists': exists,
+             'expected_sha256': identity['expected_installed_sha256'], 'expected_bytes': identity['bytes'],
+             'sha256': extras.get(built.name), 'bytes': installed.stat().st_size if exists else None}
+    receipt['installed_exe'] = facts
+    require(exists, 'Installed application executable is missing at the exact build basename')
+    require(facts['bytes'] == identity['bytes'], 'Installed application executable size differs from this build')
+    require(facts['sha256'] == identity['expected_installed_sha256'],
+            'Installed application executable differs from the exact Tauri NSIS marker patch')
+    return installed
 
 
 def save(path, value):
@@ -240,7 +319,11 @@ def main():
         raw_manifest = manifest_path.read_bytes()
         receipt['source_payload'] = verify_payload(source, raw_manifest, deadline)
         save(out / 'source-manifest.json', json.loads(raw_manifest))
-        receipt['inputs'] = {str(p): digest(p, deadline) for p in (installer, built, Path(__file__), REPO/'tools/desktop_acceptance.py')}
+        bundler_files = check_bundler_version(REPO)
+        receipt['inputs'] = {str(p): digest(p, deadline) for p in (installer, built, Path(__file__), REPO/'tools/desktop_acceptance.py', *bundler_files)}
+        receipt['shell_derivation'] = nsis_shell_identity(built, deadline)
+        require(receipt['shell_derivation']['original_sha256'] == receipt['inputs'][str(built)],
+                'Build executable changed before installation')
         install_parent = Path(tempfile.mkdtemp(prefix='WeCFU install 验证 '))
         destination = install_parent / 'WeCFU isolated'
         receipt['isolated_install_directory'] = str(destination)
@@ -256,13 +339,7 @@ def main():
                                             out, deadline, INSTALL_SECONDS, 'installer')
         installed_bundle = destination / 'bundle'
         receipt['installed_payload'] = verify_payload(installed_bundle, raw_manifest, deadline)
-        installed_exe = destination / built.name
-        require(installed_exe.is_file() and digest(installed_exe, deadline) == receipt['inputs'][str(built)],
-                'Installed application executable differs from this build')
-        receipt['installed_exe'] = {'path': str(installed_exe), 'sha256': digest(installed_exe, deadline)}
-        whole = inventory(destination, deadline)
-        extras = {name:digest(path, deadline) for name,path in whole.items() if not name.startswith('bundle/')}
-        receipt['non_bundle_installed_files'] = extras  # Includes shell/uninstaller; not part of bundle inventory.
+        installed_exe = verify_installed_shell(destination, built, receipt['shell_derivation'], deadline, receipt)
         api_output = out / 'installed-api'
         receipt['api_process'] = run_owned([sys.executable, '-B', str(REPO/'tools/desktop_acceptance.py'),
             '--bundle', str(installed_bundle), '--output', str(api_output)], out, deadline, API_SECONDS, 'installed-api')
@@ -282,7 +359,9 @@ def main():
         receipt['installed_api_receipt'] = {'path':str(api_output/'result.json'), 'sha256':digest(api_output/'result.json', deadline),
                                            'actual_runtime':result['actual_runtime'],'model_requests':2}
         require(digest(installer, deadline) == receipt['inputs'][str(installer)]
-                and digest(installed_exe, deadline) == receipt['inputs'][str(built)]
+                and digest(built, deadline) == receipt['inputs'][str(built)]
+                and digest(installed_exe, deadline) == receipt['shell_derivation']['expected_installed_sha256']
+                and all(digest(path, deadline) == receipt['inputs'][str(path)] for path in bundler_files)
                 and (installed_bundle/'bundle-manifest.json').read_bytes() == raw_manifest,
                 'Installer or installed source binding changed during acceptance')
         receipt['status'] = 'passed'

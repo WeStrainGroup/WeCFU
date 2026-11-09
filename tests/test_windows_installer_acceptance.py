@@ -130,3 +130,74 @@ def test_nonwindows_refuses_without_spawning_or_installing(tmp_path,monkeypatch)
     assert accept.main()==1
     record=json.loads((tmp_path/'evidence/result.json').read_text())
     assert record['status']=='failed' and 'Windows-only' in record['error']
+
+
+def test_nsis_identity_is_full_hash_of_only_fixed_marker_change_across_chunk_boundary(tmp_path):
+    built=tmp_path/'wecfu-desktop.exe'
+    original=b'MZ' + b'x'*(1024**2-13) + accept.UNKNOWN_BUNDLE_MARKER + b'rest-of-executable'
+    expected=original.replace(accept.UNKNOWN_BUNDLE_MARKER,accept.NSIS_BUNDLE_MARKER,1)
+    built.write_bytes(original)
+    identity=accept.nsis_shell_identity(built,time.monotonic()+5)
+    assert identity['expected_installed_sha256']==hashlib.sha256(expected).hexdigest()
+    assert identity['original_sha256']==hashlib.sha256(original).hexdigest()
+    assert identity['bytes']==len(original)==len(expected)
+    assert identity['marker_offset']==original.index(accept.UNKNOWN_BUNDLE_MARKER)
+    assert built.read_bytes()==original
+    destination=tmp_path/'installed';destination.mkdir()
+    (destination/built.name).write_bytes(expected)
+    (destination/'uninstall.exe').write_bytes(b'uninstaller')
+    receipt={}
+    assert accept.verify_installed_shell(destination,built,identity,time.monotonic()+5,receipt)==destination/built.name
+    assert set(receipt['non_bundle_installed_files'])=={built.name,'uninstall.exe'}
+
+
+@pytest.mark.parametrize('mutation',['wrong-name','unpatched','other-byte','changed-size'])
+def test_nsis_shell_rejects_any_other_identity_and_retains_root_inventory(tmp_path,mutation):
+    built=tmp_path/'wecfu-desktop.exe';original=b'MZ'+accept.UNKNOWN_BUNDLE_MARKER+b'executable'
+    built.write_bytes(original);identity=accept.nsis_shell_identity(built,time.monotonic()+5)
+    expected=original.replace(accept.UNKNOWN_BUNDLE_MARKER,accept.NSIS_BUNDLE_MARKER)
+    destination=tmp_path/'installed';destination.mkdir()
+    name='WeCFU.exe' if mutation=='wrong-name' else built.name
+    actual=original if mutation=='unpatched' else b'NZ'+expected[2:] if mutation=='other-byte' else expected+b'!' if mutation=='changed-size' else expected
+    (destination/name).write_bytes(actual)
+    receipt={}
+    with pytest.raises(RuntimeError):
+        accept.verify_installed_shell(destination,built,identity,time.monotonic()+5,receipt)
+    assert receipt['non_bundle_installed_files']=={name:hashlib.sha256(actual).hexdigest()}
+    assert receipt['installed_exe']['exists']==(mutation!='wrong-name')
+    assert (destination/name).read_bytes()==actual
+
+
+@pytest.mark.parametrize('markers',[b'no-known-marker',accept.UNKNOWN_BUNDLE_MARKER*2])
+def test_nsis_identity_rejects_unknown_or_duplicate_marker(tmp_path,markers):
+    built=tmp_path/'app.exe';built.write_bytes(b'MZ'+markers)
+    with pytest.raises(RuntimeError,match='Duplicate build' if markers==accept.UNKNOWN_BUNDLE_MARKER*2 else 'Missing build'):
+        accept.nsis_shell_identity(built,time.monotonic()+5)
+
+
+@pytest.mark.parametrize('change',[b'altered',b''])
+def test_nsis_identity_rejects_build_mutation_between_scan_and_derived_hash(tmp_path,monkeypatch,change):
+    built=tmp_path/'app.exe';original=b'MZ'+accept.UNKNOWN_BUNDLE_MARKER+b'payload';built.write_bytes(original)
+    real_open=Path.open;reads=0
+    def changing_open(path,*args,**kwargs):
+        nonlocal reads
+        if path==built and args and args[0]=='rb':
+            reads+=1
+            if reads==2:
+                with real_open(path,'wb') as stream:stream.write(b'MZ'+accept.UNKNOWN_BUNDLE_MARKER+change)
+        return real_open(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',changing_open)
+    with pytest.raises(RuntimeError,match='changed'):
+        accept.nsis_shell_identity(built,time.monotonic()+5)
+
+
+def test_nsis_identity_pins_both_lock_and_actual_cli_version(tmp_path):
+    lock=tmp_path/'desktop/package-lock.json';lock.parent.mkdir()
+    cli=tmp_path/'desktop/node_modules/@tauri-apps/cli/package.json';cli.parent.mkdir(parents=True)
+    lock.write_text(json.dumps({'packages':{'node_modules/@tauri-apps/cli':{'version':'2.12.4'}}}))
+    cli.write_text(json.dumps({'version':'2.12.4'}))
+    assert accept.check_bundler_version(tmp_path)==[lock,cli]
+    for modified in (cli,lock):
+        before=modified.read_bytes();modified.write_bytes(before.replace(b'2.12.4',b'2.12.5'))
+        with pytest.raises(RuntimeError,match='Unreviewed'):accept.check_bundler_version(tmp_path)
+        modified.write_bytes(before)
