@@ -58,8 +58,8 @@ native Tauri prerequisites. These are developer tools, not end-user requirements
 python tools/build_desktop_resources.py --output desktop/bundle --version 1.3.0-rc.1
 cd desktop
 npm ci
-npm run build -- --config src-tauri/tauri.macos.conf.json
-# Windows uses src-tauri/tauri.windows.conf.json instead.
+npm run build -- --bundles app --config src-tauri/tauri.macos.conf.json
+# Windows: npm run build -- --bundles nsis --config src-tauri/tauri.windows.conf.json
 ```
 
 The resource builder downloads the pinned official python-build-standalone
@@ -73,6 +73,51 @@ After a source-only change, `--refresh-app` validates the previous bundle and
 preserves its verified runtime and model resources. It refuses unowned/nonempty
 outputs, unexplained files and changed preserved resources. Bundle resources,
 compiled binaries, photos and test outputs are not committed to source control.
+
+### macOS candidate packaging
+
+Build the `.app` first. A linker-signed executable alone is not a complete signed
+app bundle; do not distribute a DMG if `codesign --verify --deep --strict` fails.
+For a local candidate without a Developer ID identity, use this order:
+
+1. Copy the built `.app` with `ditto` into a new staging directory. Preserve the
+   original build and previous candidates. Record the resource manifest SHA256.
+2. Ad-hoc sign **only the outer app**, then verify the complete bundle:
+
+   ```sh
+   codesign --force --sign - "$WECFU_STAGING/WeCFU.app"
+   codesign --verify --deep --strict --verbose=2 "$WECFU_STAGING/WeCFU.app"
+   codesign -dv --verbose=4 "$WECFU_STAGING/WeCFU.app"
+   ```
+
+   `WECFU_STAGING` is the new staging directory. Do not add `--deep` to the
+   signing command: recursively re-signing the bundled runtime can change files
+   covered by `Contents/Resources/bundle/bundle-manifest.json`. If verification
+   fails for an internal binary, investigate it before changing that payload.
+3. Verify that the manifest SHA256 is unchanged, every file digest still matches
+   `files`, and the resource inventory has no missing or extra files. Signing may
+   change the outer executable and add `Contents/_CodeSignature`; it must not
+   change the runtime, model, or application resources covered by the manifest.
+4. Add an `Applications` symlink to `/Applications` beside the staged app. Create
+   a new UDZO image and validate it; use a new filename rather than overwriting
+   prior evidence:
+
+   ```sh
+   ln -s /Applications "$WECFU_STAGING/Applications"
+   hdiutil create -srcfolder "$WECFU_STAGING" -volname WeCFU \
+     -format UDZO -fs HFS+ -noatomic -nospotlight "$WECFU_DMG"
+   hdiutil verify "$WECFU_DMG"
+   ```
+
+5. Mount that image read-only, copy the app into a fresh installation directory,
+   and repeat the complete resource and strict signature checks on the copy.
+   Record its manifest, native executable and DMG hashes. Unmount only the image
+   created for this check. Perform native-window acceptance on this installed
+   copy, including exports and cleanup on close.
+
+An ad-hoc signed candidate has no Developer ID identity or notarization. Passing
+these checks establishes package integrity, not Gatekeeper approval for public
+distribution. Keep the signature and installation results with the candidate.
 
 ## Acceptance and release
 
