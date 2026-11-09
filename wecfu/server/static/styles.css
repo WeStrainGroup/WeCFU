@@ -230,6 +230,11 @@ body:has(#viewer.review-mode) #export-menu { display: none; }
 #modal-backdrop, #export-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: center; align-items: center; background: #30303055; backdrop-filter: blur(5px); }
 #help-modal, #export-modal { display: flex; flex-direction: column; width: min(700px,92vw); max-height: 88vh; color: var(--text); background: #ffffff; border: 1px solid #ffffff99; border-radius: 17px; box-shadow: 0 20px 80px #23232340; }
 #export-modal { width: min(440px,92vw); }
+#confirmation-dialog { width: min(480px,92vw); max-height: 88vh; padding: 0; color: var(--text); background: #fff; border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 20px 80px #23232340; }
+#confirmation-dialog::backdrop { background: #30303055; backdrop-filter: blur(5px); }
+#confirmation-dialog[open] { display: flex; flex-direction: column; }
+#confirmation-message { white-space: pre-wrap; overflow-wrap: anywhere; }
+.confirmation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 0 21px 18px; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 17px 21px; border-bottom: 1px solid var(--line); }
 .modal-header h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
 .modal-body { padding: 18px 21px; overflow-y: auto; font-size: 12px; line-height: 1.6; }

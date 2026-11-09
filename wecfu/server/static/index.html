@@ -219,6 +219,15 @@
       <div id="notes-bar"><label for="notes-input" data-i18n="notesLabel">Notes</label><input id="notes-input" data-i18n-placeholder="notesPlaceholder" placeholder="Per image note, stored in CSV"/></div>
     </section>
   </main>
+  <dialog id="confirmation-dialog" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">
+    <div class="modal-header"><h2 id="confirmation-title"></h2></div>
+    <div class="modal-body"><p id="confirmation-message"></p></div>
+    <div class="confirmation-actions">
+      <button id="btn-confirm-cancel" type="button" autofocus data-i18n="exportCancel">Cancel</button>
+      <button id="btn-confirm-accept" type="button" class="primary"></button>
+    </div>
+  </dialog>
+
   <!-- Help modal -->
   <div id="modal-backdrop" hidden>
     <div id="help-modal" role="dialog" aria-modal="true">

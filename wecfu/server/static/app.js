@@ -116,7 +116,39 @@ function toggleAdjustmentPanel() {
   else clearPreview();
   updateControls(); draw(); refreshMaskPreview(); focusCanvas();
 }
-function modalOpen() { return !$('modal-backdrop').hidden || !$('export-backdrop').hidden; }
+let pendingConfirmation = null;
+function modalOpen() { return Boolean(pendingConfirmation) || !$('modal-backdrop').hidden || !$('export-backdrop').hidden; }
+function confirmAction({title, message, acceptLabel = title}) {
+  // WebViews do not necessarily implement window.confirm. A modal HTML dialog
+  // supplies the same explicit decision without depending on a native delegate.
+  if (modalOpen()) return Promise.resolve(false);
+  const dialog = $('confirmation-dialog'), previousFocus = document.activeElement;
+  $('confirmation-title').textContent = title;
+  $('confirmation-message').textContent = message; // Filenames are text, never markup.
+  $('btn-confirm-cancel').textContent = t('exportCancel');
+  $('btn-confirm-accept').textContent = acceptLabel;
+  return new Promise((resolve, reject) => {
+    pendingConfirmation = {resolve, previousFocus};
+    try {
+      dialog.showModal(); // Native modal semantics make the background inert and contain focus.
+      $('btn-confirm-cancel').focus({preventScroll: true});
+    } catch (error) {
+      pendingConfirmation = null;
+      reject(error); // An unavailable dialog must never imply consent.
+    }
+  });
+}
+function finishConfirmation(accepted = false) {
+  const pending = pendingConfirmation;
+  if (!pending) return;
+  pendingConfirmation = null;
+  const dialog = $('confirmation-dialog');
+  if (dialog.open) dialog.close();
+  if (pending.previousFocus?.isConnected && !pending.previousFocus.disabled) {
+    pending.previousFocus.focus({preventScroll: true});
+  } else focusCanvas();
+  pending.resolve(accepted === true);
+}
 function focusCanvas({preserveEditing = false} = {}) {
   if (modalOpen()) return;
   if (preserveEditing && workflowHelpers?.ownsArrowKeys(document.activeElement)) return;
@@ -186,7 +218,7 @@ function samMethod() { return modelMethod() && selectedModelEngine() === SAM_ENG
 function fusionMethod() { return modelMethod() && [FUSION_ENGINE, FUSION_V2_ENGINE].includes(selectedModelEngine()); }
 function fixedRecipeMethod() { return samMethod() || fusionMethod(); }
 function modelInset() { return fixedRecipeMethod() ? modelHelpers.SAM_INSET : Number($('p-inset').value); }
-function editable() { return Boolean(state.doc && state.img && !state.loading && !state.busy && !state.crop && !applyPending() && !reviewBlocked()); }
+function editable() { return Boolean(state.doc && state.img && !state.loading && !state.busy && !state.crop && !applyPending() && !reviewBlocked() && !pendingConfirmation); }
 function snapshot() {
   validateReviewState({...state.doc, detections: state.detections});
   return {detections: clone(state.detections), plate: clone(state.plate),
@@ -776,7 +808,7 @@ async function loadPlateImage(url, referenceContext = false, signal) {
   finally { URL.revokeObjectURL(objectURL); }
 }
 async function selectImage(name, {force = false, queueValidated = false} = {}) {
-  if (state.loading || state.busy || state.crop || applyPending() || reviewBlocked() || (name === state.imageName && !force)) return;
+  if (pendingConfirmation || state.loading || state.busy || state.crop || applyPending() || reviewBlocked() || (name === state.imageName && !force)) return;
   if (reviewMode() && !state.review.queue.items.some(item => item.name === name)) return;
   clearModelPreview();
   state.loading = true; updateControls();
@@ -1521,7 +1553,7 @@ async function recount() {
   if (restrictedReview() || !editable() || state.doc.mode === 'manual' || modelMethod()) return;
   clearModelPreview();
   const params = normalWorkflow() ? (customWorkflow() ? appliedCustomParams() : {...DEFAULTS}) : paramsBody(), engine = selectedBuiltinEngine();
-  const hash = state.imageSourceHash;
+  const hash = state.imageSourceHash, currentKey = keyFor();
   if (!/^[a-f0-9]{64}$/.test(hash || '')) throw new Error(t('recognitionSourceUnavailable'));
   let url = `${imageURL('/run')}?engine=${enc(engine)}&expected_image_sha256=${hash}`;
   state.busy = true; updateControls(); setStatus(t('statusProcessing')); clearPreview();
@@ -1536,9 +1568,11 @@ async function recount() {
     if (normalWorkflow()) {
       const reference = state.config?.web_mode ? {status: 'missing'} : await jsonRequest(imageURL('/reference'));
       const protection = workflowHelpers.batchProtection(state.doc, reference);
-      if (protection && !window.confirm(t('customProtectedConfirm').replace('{name}', state.imageName).replace('{count}', state.detections.length))) {
+      if (protection && !await confirmAction({title: t('recognizeCurrent'),
+        message: t('customProtectedConfirm').replace('{name}', state.imageName).replace('{count}', state.detections.length)})) {
         setStatus(''); return;
       }
+      if (currentKey !== keyFor() || hash !== state.imageSourceHash) { setStatus(''); return; }
       // Reference confirmation does not bump the image revision. Recheck unprotected work
       // under the server lock too; only an explicit replacement confirmation may opt out.
       if (!protection) url += '&protect_existing_edits=true';
@@ -1717,7 +1751,7 @@ async function countCustomBatch() {
 }
 
 async function ingestPath(path) {
-  if (reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
+  if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
   clearModelPreview();
   state.busy = true; updateControls(); setStatus(t('statusIngesting'));
   try {
@@ -1727,7 +1761,7 @@ async function ingestPath(path) {
   } finally { state.busy = false; updateControls(); }
 }
 async function uploadFiles(fileList) {
-  if (reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
+  if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
   clearModelPreview();
   const files = Array.from(fileList).filter(file => /\.(jpe?g|png|tif{1,2})$/i.test(file.name));
   if (!files.length) throw new Error(t('noImages'));
@@ -1762,7 +1796,7 @@ async function walkDir(entry, files) {
   }
 }
 function bulkSelectionLocked() {
-  return reviewMode() || state.busy || state.loading || Boolean(state.crop) || applyPending() || state.modelPreview.loading;
+  return Boolean(pendingConfirmation) || reviewMode() || state.busy || state.loading || Boolean(state.crop) || applyPending() || state.modelPreview.loading;
 }
 function updateBulkSelectionControls() {
   const selection = state.bulkSelection;
@@ -1823,7 +1857,12 @@ async function removeSelectedImages() {
   const names = state.imageList.filter(item => state.bulkSelection.names.has(item.name)).map(item => item.name);
   if (!names.length) return;
   const details = names.slice(0, 8).join('\n') + (names.length > 8 ? '\n…' : '');
-  if (!window.confirm(t('bulkDeleteConfirm').replace('{count}', names.length) + '\n\n' + details)) return;
+  if (!await confirmAction({title: t('deleteSelectedImages'),
+    message: t('bulkDeleteConfirm').replace('{count}', names.length) + '\n\n' + details})) return;
+  // Unlike window.confirm, the dialog leaves asynchronous work running. Do not
+  // apply an old selection to a changed batch or a newly locked operation.
+  if (bulkSelectionLocked() || batch !== state.batch || !state.bulkSelection.enabled
+      || names.length !== state.bulkSelection.names.size || names.some(name => !state.bulkSelection.names.has(name))) return;
   clearModelPreview(); clearPreview();
   state.busy = true; updateControls();
   const report = {removed: [], failed: []};
@@ -1865,9 +1904,10 @@ async function removeSelectedImages() {
 
 async function removeImage() {
   if (reviewMode() || !editable()) return;
-  const name = state.imageName, url = imageURL(), key = keyFor();
+  const name = state.imageName, url = imageURL(), key = keyFor(), doc = state.doc;
   const index = state.imageList.findIndex(item => item.name === name);
-  if (!window.confirm(`${t('removeImageConfirm')}\n${name}`)) return;
+  if (!await confirmAction({title: t('removeImage'), message: `${t('removeImageConfirm')}\n${name}`})) return;
+  if (key !== keyFor() || doc !== state.doc || !editable() || reviewMode()) return;
   state.busy = true; updateControls();
   try {
     await flushEdits(); await jsonRequest(url, 'DELETE');
@@ -1939,6 +1979,10 @@ function populateLangSelect() {
   });
 }
 function onKeyDown(event) {
+  if (pendingConfirmation) {
+    if (event.key === 'Escape') { event.preventDefault(); finishConfirmation(false); }
+    return; // Enter/Space/Tab keep the dialog's native button and focus behavior.
+  }
   if (event.key === 'Escape') {
     $('recognition-mode-info').open = false;
     cancelGesture(); if (state.crop) cancelCrop(); closeHelp();
@@ -2042,6 +2086,13 @@ function wireUpHandlers() {
   for (const key of ['cx', 'cy', 'r']) $(`crop-${key}`).addEventListener('input', cropInputChanged);
   $('modal-backdrop').addEventListener('click', event => { if (event.target.id === 'modal-backdrop') closeHelp(); });
   $('export-backdrop').addEventListener('click', event => { if (event.target.id === 'export-backdrop' && !state.busy) $('export-backdrop').hidden = true; });
+  $('btn-confirm-cancel').addEventListener('click', () => finishConfirmation(false));
+  $('btn-confirm-accept').addEventListener('click', () => finishConfirmation(true));
+  $('confirmation-dialog').addEventListener('cancel', event => { event.preventDefault(); finishConfirmation(false); });
+  $('confirmation-dialog').addEventListener('close', () => {
+    // A delayed close event from the previous decision must not cancel a new one.
+    if (!$('confirmation-dialog').open) finishConfirmation(false);
+  });
   const canvas = $('canvas');
   canvas.tabIndex = 0;
   $('canvas-wrap').addEventListener('pointerdown', event => {

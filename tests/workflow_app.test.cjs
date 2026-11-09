@@ -14,7 +14,7 @@ const savedDoc = {mode: 'auto', plate: {cx: 100, cy: 100, r: 90}, params: savedP
   revision: 7, counted: true, reviewed: false, plate_manual: false, notes: '',
   machine_count_initial: 1, detections: [{id: 9, cx: 80, cy: 90, r: 5, source: 'cv', score: .8, accepted: true}]};
 
-function ui() {
+function ui(locale) {
   const nodes = new Map(), windowListeners = new Map(), errors = [];
   let uuidSequence = 0;
   const crypto = {randomUUID: () => `00000000-0000-4000-8000-${String(++uuidSequence).padStart(12, '0')}`};
@@ -22,7 +22,7 @@ function ui() {
   function node(id = '', tagName = 'DIV') {
     const classes = new Set(), attributes = new Map(), handlers = new Map();
     return {id, tagName, value: '', textContent: '', checked: false, disabled: false, hidden: false,
-      open: false, dataset: {}, children: [], style: {setProperty() {}}, attributes, handlers,
+      open: false, isConnected: true, dataset: {}, children: [], style: {setProperty() {}}, attributes, handlers,
       scrollTop: 0, clientHeight: 200, scrollHeight: 1000, clientTop: 0,
       rect: {top: 0, bottom: 20, width: 500, height: 200}, focusCalls: [],
       classList: {toggle(name, force) { const add = force ?? !classes.has(name); if (add) classes.add(name); else classes.delete(name); return add; },
@@ -31,6 +31,8 @@ function ui() {
       addEventListener(type, fn) { if (!handlers.has(type)) handlers.set(type, []); handlers.get(type).push(fn); },
       async fire(type, event = {}) { for (const fn of handlers.get(type) || []) await fn({target: this, ...event}); },
       focus(options) { this.focusCalls.push(plain(options)); document.activeElement = this; },
+      showModal() { if (this.open) throw new Error('already open'); this.open = true; this.showModalCalls = (this.showModalCalls || 0) + 1; },
+      close() { this.open = false; },
       getBoundingClientRect() { return this.rect; },
       checkValidity() { return this.value !== '' && Number.isFinite(Number(this.value)); },
       closest() { return null; },
@@ -53,7 +55,7 @@ function ui() {
   element('model-tools').appendChild(replacementHint);
   const window = {location: {search: ''}, crypto,
     addEventListener(type, fn) { if (!windowListeners.has(type)) windowListeners.set(type, []); windowListeners.get(type).push(fn); },
-    confirm: () => false,
+    confirm: () => { throw new Error('native confirm is not available in this WebView'); },
     WECFU_I18N: {t: key => key, getLang: () => 'en'},
     WECFU_PARAM_CONTROLS: require('../wecfu/server/static/param_controls.js'),
     WECFU_REFERENCE_CONTROLS: require('../wecfu/server/static/reference_controls.js'),
@@ -62,6 +64,13 @@ function ui() {
     WECFU_WORKFLOW_CONTROLS: require('../wecfu/server/static/workflow_controls.js'),
     WECFU_DEFAULT_BATCH: require('../wecfu/server/static/default_batch.js'),
     WECFU_SERIAL_BATCH: require('../wecfu/server/static/serial_batch.js')};
+  if (locale) {
+    const translationContext = {window: {}, localStorage: {getItem() {}, setItem() {}},
+      document: {querySelectorAll: () => [], documentElement: {}}};
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../wecfu/server/static/i18n.js'), 'utf8'), translationContext);
+    translationContext.window.WECFU_I18N.setLang(locale);
+    window.WECFU_I18N = translationContext.window.WECFU_I18N;
+  }
   const context = vm.createContext({window, document, console: {error: e => errors.push(e)},
     URLSearchParams, AbortController, crypto, clearTimeout, setTimeout, requestAnimationFrame: () => 1,
     ResizeObserver: class { observe() {} }, queueMicrotask() {},
@@ -98,6 +107,14 @@ function custom(view) {
 
 function samDefault(view) {
   view.run("state.config.default_model = SAM_ENGINE; state.workflow.kind = 'default'; syncWorkflowRoute(); updateControls();");
+}
+
+async function answerConfirmation(view, pending, accept) {
+  // Callers may flush queued saves or read a reference before opening the dialog.
+  for (let turn = 0; turn < 20 && !view.element('confirmation-dialog').open; turn++) await Promise.resolve();
+  assert.equal(view.element('confirmation-dialog').open, true, 'must ask before writing');
+  await view.element(accept ? 'btn-confirm-accept' : 'btn-confirm-cancel').fire('click');
+  return pending;
 }
 
 for (const available of [true, false]) {
@@ -779,8 +796,7 @@ test('custom batch recounts machine-only results with one captured recipe, skips
 
 test('single edited recount asks permission and uses the latest queue revision after flush', async () => {
   const v = ui(); custom(v);
-  v.run(`state.doc.notes = 'preserve edited note'; let allow = false;
-    window.confirm = text => { confirmations.push(text); return allow; };
+  v.run(`state.doc.notes = 'preserve edited note';
     flushEdits = async () => { state.saveQueues.get(keyFor()).revision = 31; };
     jsonRequest = async (url, method = 'GET', body) => {
       calls.push({url, method, body: body === undefined ? null : clone(body)});
@@ -789,16 +805,15 @@ test('single edited recount asks permission and uses the latest queue revision a
       throw new Error('unexpected route');
     };`);
   const before = plain(v.run('snapshot()'));
-  await v.run('recount()');
+  await answerConfirmation(v, v.run('recount()'), false);
   assert.equal(v.run("calls.filter(c => c.method === 'POST').length"), 0);
   assert.equal(v.run('state.history.length'), 0);
   assert.deepEqual(plain(v.run('snapshot()')), before);
-  v.run('allow = true');
-  await v.run('recount()');
+  await answerConfirmation(v, v.run('recount()'), true);
   const posts = plain(v.run("calls.filter(c => c.method === 'POST')"));
   assert.equal(posts.length, 1);
   assert.equal(new URL(posts[0].url, 'http://synthetic').searchParams.get('expected_revision'), '31');
-  assert.equal(v.run('confirmations.length'), 2);
+  assert.equal(v.element('confirmation-dialog').showModalCalls, 2);
   assert.equal(v.run('state.history.length'), 1);
 });
 
@@ -865,7 +880,6 @@ test('single unprotected recount rejects a newly created reference race with pro
   const v = ui(); custom(v);
   const before = plain(v.run('snapshot()'));
   v.run(`let referenceCreated = false;
-    window.confirm = text => { confirmations.push(text); return true; };
     jsonRequest = async (url, method = 'GET', body) => {
       calls.push({url, method, body: body === undefined ? null : clone(body)});
       if (url.endsWith('/reference')) {
@@ -885,7 +899,7 @@ test('single unprotected recount rejects a newly created reference race with pro
   const query = new URL(posts[0].url, 'http://synthetic').searchParams;
   assert.equal(query.get('protect_existing_edits'), 'true');
   assert.equal(query.get('expected_revision'), '9');
-  assert.equal(v.run('confirmations.length'), 0);
+  assert.equal(v.element('confirmation-dialog').showModalCalls || 0, 0);
   assert.equal(v.run('state.history.length'), 0);
   assert.equal(v.run('saves.length'), 0);
   assert.equal(v.run('state.busy'), false);
@@ -1424,8 +1438,7 @@ test('cancelled bulk deletion sends no deletion, preserves selection and saves n
   const v = ui();
   v.run(`state.imageList = [{name:'first.png'}, {name:'second.png'}]; renderImageList(); toggleBulkSelection(); selectBulkImages(true);
     let flushed = 0; flushEdits = async () => { flushed++; };`);
-  v.window.confirm = () => false;
-  await v.element('btn-bulk-delete').fire('click');
+  await answerConfirmation(v, v.element('btn-bulk-delete').fire('click'), false);
   assert.equal(v.run('calls.length'), 0);
   assert.equal(v.run('flushed'), 0);
   assert.equal(v.run('state.bulkSelection.names.size'), 2);
@@ -1434,12 +1447,11 @@ test('cancelled bulk deletion sends no deletion, preserves selection and saves n
 
 test('bulk deletion flushes first, removes only the chosen photos sequentially and preserves unchosen view', async () => {
   const v = ui(), before = plain(v.run('snapshot()'));
-  v.window.confirm = () => true;
   v.run(`state.imageList = [{name:'first.png'}, {name:'a & b.png'}, {name:'third.png'}]; renderImageList();
     toggleBulkSelection(); toggleBulkImage('a & b.png'); toggleBulkImage('third.png');
     let order = []; flushEdits = async () => order.push('flush');
     jsonRequest = async (url, method) => { if (method !== 'DELETE') throw Error('wrong method'); order.push(url); return {ok:true}; };`);
-  await v.element('btn-bulk-delete').fire('click');
+  await answerConfirmation(v, v.element('btn-bulk-delete').fire('click'), true);
   assert.deepEqual(plain(v.run('order')), ['flush', '/api/batch/synthetic/image/a%20%26%20b.png', '/api/batch/synthetic/image/third.png']);
   assert.deepEqual(plain(v.run('state.imageList')), [{name:'first.png'}]);
   assert.equal(v.run('state.imageName'), 'first.png');
@@ -1449,12 +1461,12 @@ test('bulk deletion flushes first, removes only the chosen photos sequentially a
 });
 
 test('deleting the displayed photo selects a remaining photo; failed removals stay selected and are reported', async () => {
-  const v = ui(); v.window.confirm = () => true;
+  const v = ui();
   v.run(`state.imageList = [{name:'first.png'}, {name:'fail.png'}, {name:'keep.png'}]; renderImageList();
     toggleBulkSelection(); toggleBulkImage('first.png'); toggleBulkImage('fail.png');
     let opened = []; selectImage = async name => opened.push(name);
     jsonRequest = async (url, method) => { if (url.endsWith('/fail.png')) throw Object.assign(new Error('synthetic failure'),{status:500}); return {ok:true}; };`);
-  await v.element('btn-bulk-delete').fire('click');
+  await answerConfirmation(v, v.element('btn-bulk-delete').fire('click'), true);
   assert.equal(v.run('state.doc'), null);
   assert.equal(v.run("state.saveQueues.has('synthetic\\nfirst.png')"), false);
   assert.deepEqual(plain(v.run('opened')), ['fail.png']);
@@ -1465,10 +1477,10 @@ test('deleting the displayed photo selects a remaining photo; failed removals st
 });
 
 test('all deleted or already absent photos leave an empty viewer; no retry on uncertain deletion', async () => {
-  const v = ui(); v.window.confirm = () => true;
+  const v = ui();
   v.run(`renderImageList(); toggleBulkSelection(); selectBulkImages(true);
     jsonRequest = async (url, method) => { calls.push({url,method}); throw Object.assign(new Error('already absent'), {status:404}); };`);
-  await v.element('btn-bulk-delete').fire('click');
+  await answerConfirmation(v, v.element('btn-bulk-delete').fire('click'), true);
   assert.equal(v.run('state.imageList.length'), 0);
   assert.equal(v.run('state.doc'), null);
   assert.equal(v.element('bulk-image-tools').hidden, true);
@@ -1479,14 +1491,15 @@ test('all deleted or already absent photos leave an empty viewer; no retry on un
 test('pending saves, recognition and verification contexts cannot trigger bulk deletion', async () => {
   for (const guard of ['state.busy = true', 'state.loading = true', 'state.crop = {}',
     'state.modelPreview.loading = true', 'state.modelPreview.pendingApply = {}', 'state.review.requested = true']) {
-    const v = ui(); v.window.confirm = () => { throw new Error('must not confirm'); };
+    const v = ui();
     v.run('renderImageList(); toggleBulkSelection(); selectBulkImages(true); ' + guard);
     await v.run('removeSelectedImages()');
     assert.equal(v.run('calls.length'), 0, guard);
+    assert.equal(v.element('confirmation-dialog').open, false, guard);
   }
-  const v = ui(); v.window.confirm = () => true;
+  const v = ui();
   v.run(`renderImageList(); toggleBulkSelection(); selectBulkImages(true); flushEdits = async () => { throw Error('save failed'); };`);
-  await assert.rejects(v.run('removeSelectedImages()'), /save failed/);
+  await assert.rejects(answerConfirmation(v, v.run('removeSelectedImages()'), true), /save failed/);
   assert.equal(v.run('state.busy'), false);
   assert.equal(v.run('calls.length'), 0);
   assert.equal(v.run('state.bulkSelection.names.size'), 1);
@@ -1500,6 +1513,145 @@ test('changing batch or refreshing removed names cannot leak stale bulk selectio
   v.run(`toggleBulkSelection(); selectBulkImages(true); state.imageList = [{name:'other.png'}]; updateBulkSelectionControls();`);
   assert.equal(v.run('state.bulkSelection.names.size'), 0);
   assert.equal(v.element('btn-bulk-delete').disabled, true);
+});
+
+test('in-app confirmation defaults to cancel, blocks background keys/edits and restores trigger focus', async () => {
+  const v = ui(), trigger = v.element('btn-bulk-delete');
+  v.document.activeElement = trigger;
+  v.run(`renderImageList(); toggleBulkSelection(); selectBulkImages(true);
+    moveSelection = async delta => moves.push(delta);`);
+  const before = plain(v.run('snapshot()'));
+  const pending = trigger.fire('click');
+  assert.equal(v.element('confirmation-dialog').open, true);
+  assert.equal(v.document.activeElement, v.element('btn-confirm-cancel'));
+  assert.equal(v.run('modalOpen()'), true);
+  assert.equal(v.run('editable()'), false);
+  await v.key({key: 'ArrowRight', preventDefault() {}});
+  await v.key({key: 'Enter', preventDefault() {}});
+  v.run('clearAll(); toggleAllBulkImages();');
+  assert.equal(v.run('moves.length'), 0);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('state.bulkSelection.names.size'), 1);
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  let prevented = false;
+  await v.key({key: 'Escape', preventDefault() { prevented = true; }});
+  await pending;
+  assert.equal(prevented, true);
+  assert.equal(v.element('confirmation-dialog').open, false);
+  assert.equal(v.document.activeElement, trigger);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+});
+
+test('modal confirmation is safe text, ignores duplicate requests and does not cancel a new decision on a late close event', async () => {
+  const v = ui();
+  const first = v.run(`confirmAction({title: 'Delete', message: '<img src=x onerror=bad()>\\nphoto.png'})`);
+  assert.equal(v.element('confirmation-message').textContent, '<img src=x onerror=bad()>\nphoto.png');
+  assert.equal(v.element('confirmation-message').innerHTML, undefined);
+  assert.equal(await v.run(`confirmAction({title: 'Second', message: 'must not replace first'})`), false);
+  assert.equal(v.element('confirmation-title').textContent, 'Delete');
+  await v.element('btn-confirm-cancel').fire('click');
+  assert.equal(await first, false);
+  const next = v.run(`confirmAction({title: 'Next', message: 'New decision'})`);
+  await v.element('confirmation-dialog').fire('close'); // queued from the previous close()
+  assert.equal(v.element('confirmation-dialog').open, true);
+  assert.equal(v.run('Boolean(pendingConfirmation)'), true);
+  await v.element('btn-confirm-accept').fire('click');
+  await v.element('btn-confirm-accept').fire('click');
+  assert.equal(await next, true);
+  assert.equal(v.run('Boolean(pendingConfirmation)'), false);
+});
+
+test('native dialog cancel, unexpected close and failure to open all fail closed', async () => {
+  const v = ui();
+  for (const kind of ['cancel', 'close']) {
+    const pending = v.run('removeImage()');
+    if (kind === 'close') v.element('confirmation-dialog').close();
+    await v.element('confirmation-dialog').fire(kind, {preventDefault() {}});
+    await pending;
+    assert.equal(v.run('calls.length'), 0);
+    assert.equal(v.element('confirmation-dialog').open, false);
+  }
+  v.element('confirmation-dialog').showModal = () => { throw Error('dialog unavailable'); };
+  await assert.rejects(v.run('removeImage()'), /dialog unavailable/);
+  assert.equal(v.run('Boolean(pendingConfirmation)'), false);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('state.imageName'), 'first.png');
+});
+
+test('single image deletion waits for an explicit dialog decision and flushes exactly once before deletion', async () => {
+  const v = ui();
+  v.run(`let order = [], opened = [];
+    flushEdits = async () => order.push('flush');
+    jsonRequest = async (url, method) => { order.push({url,method}); return {ok:true}; };
+    loadImages = async () => { state.imageList = [{name:'remaining.png'}]; };
+    selectImage = async name => opened.push(name);`);
+  const pending = v.run('removeImage()');
+  assert.deepEqual(plain(v.run('order')), []);
+  await v.run('removeImage()'); // duplicate invocation cannot consume the decision
+  assert.equal(v.element('confirmation-dialog').showModalCalls, 1);
+  await answerConfirmation(v, pending, true);
+  assert.deepEqual(plain(v.run('order')), ['flush', {url:'/api/batch/synthetic/image/first.png',method:'DELETE'}]);
+  assert.deepEqual(plain(v.run('opened')), ['remaining.png']);
+  assert.equal(v.run('state.doc'), null);
+  assert.equal(v.run('state.busy'), false);
+});
+
+test('confirmation cannot authorize deletion after its batch, selection, or displayed document changes', async () => {
+  for (const change of ['state.batch = "other"', 'state.bulkSelection.names.clear()', 'state.loading = true']) {
+    const v = ui();
+    v.run('renderImageList(); toggleBulkSelection(); selectBulkImages(true);');
+    const pending = v.run('removeSelectedImages()');
+    v.run(change);
+    await answerConfirmation(v, pending, true);
+    assert.equal(v.run('calls.length'), 0, change);
+  }
+  for (const change of ['state.batch = "other"', 'state.doc = {...state.doc}', 'state.imageName = "other.png"']) {
+    const v = ui(), pending = v.run('removeImage()');
+    v.run(change);
+    await answerConfirmation(v, pending, true);
+    assert.equal(v.run('calls.length'), 0, change);
+  }
+});
+
+test('protected recount discards a dialog decision if the displayed image source changes while awaiting it', async () => {
+  const v = ui(); custom(v);
+  v.run(`state.doc.notes = 'manual note';
+    jsonRequest = async (url, method='GET') => {calls.push({url,method});return {status:'missing'};};`);
+  const pending = v.run('recount()');
+  for (let turn = 0; turn < 20 && !v.element('confirmation-dialog').open; turn++) await Promise.resolve();
+  assert.equal(v.element('confirmation-dialog').open, true);
+  v.run("state.imageSourceHash = 'f'.repeat(64)");
+  await answerConfirmation(v, pending, true);
+  assert.equal(v.run("calls.filter(c=>c.method === 'POST').length"), 0);
+  assert.equal(v.run('state.history.length'), 0);
+  assert.equal(v.run('state.busy'), false);
+});
+
+for (const locale of ['en', 'zh-CN', 'fr', 'ru']) {
+  test(`${locale} confirmation labels and all three protection messages are localized`, async () => {
+    const v = ui(locale), translations = v.window.WECFU_I18N;
+    for (const [title, message] of [['deleteSelectedImages','bulkDeleteConfirm'], ['removeImage','removeImageConfirm'], ['recognizeCurrent','customProtectedConfirm']]) {
+      assert.ok(Object.hasOwn(translations.I18N[locale], title), title);
+      assert.ok(Object.hasOwn(translations.I18N[locale], message), message);
+      v.context.confirmTitle = title; v.context.confirmMessage = message;
+      const pending = v.run(`confirmAction({title:t(confirmTitle),message:t(confirmMessage).replace('{count}',2).replace('{name}','synthetic.png')})`);
+      assert.equal(v.element('confirmation-title').textContent, translations.t(title));
+      assert.equal(v.element('btn-confirm-accept').textContent, translations.t(title));
+      assert.equal(v.element('btn-confirm-cancel').textContent, translations.t('exportCancel'));
+      assert.doesNotMatch(v.element('confirmation-message').textContent, /\{count\}|\{name\}/);
+      await answerConfirmation(v, pending, false);
+    }
+  });
+}
+
+test('confirmation markup uses native modal semantics with an accessible name, safe message and cancel-first buttons', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../wecfu/server/static/index.html'), 'utf8');
+  assert.match(html, /<dialog id="confirmation-dialog" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">/);
+  assert.match(html, /id="btn-confirm-cancel" type="button" autofocus/);
+  assert.match(html, /id="btn-confirm-accept" type="button"/);
+  assert.ok(html.indexOf('id="btn-confirm-cancel"') < html.indexOf('id="btn-confirm-accept"'));
+  assert.doesNotMatch(source, /\bwindow\.confirm\s*\(/);
 });
 
 test('unified path import declares unknown rather than inventing main/blank/back metadata', async()=>{
