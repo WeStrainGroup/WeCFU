@@ -49,10 +49,24 @@ WEB_MAX_BYTES = 400 * 1024 * 1024
 WEB_MAX_IMAGES = 100
 _LOCKS: dict[tuple, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
+_DIRECTORY_FSYNC_SUPPORTED = os.name != "nt"
 _COMPONENT_ENGINE = "component_watershed_v1"
 _SAM_FROZEN_ENGINE = "sam2_cv_frozen_v1"
 _INTERNAL_DEFAULT_PARAMS = {"plate_inset": 0.95, "min_value": 200, "max_saturation": 100,
                             "min_circularity": 0.55, "min_area_frac": 0.0001, "peak_min_distance": 15}
+
+
+def _fsync_recovery_directory(folder: Path) -> None:
+    # Windows CRT cannot open directories for os.fsync. The recovery JSON is
+    # still flushed/fsynced before adoption on every platform. Do not suppress
+    # file I/O errors, or directory sync errors on platforms that support it.
+    if not _DIRECTORY_FSYNC_SUPPORTED:
+        return
+    descriptor = os.open(folder, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 class IngestBody(BaseModel):
@@ -1045,12 +1059,9 @@ def build_app(get_root: Callable[[], Path], web_mode: bool = False) -> FastAPI:
             json.dump(value, stream, ensure_ascii=False, allow_nan=False)
             stream.flush()
             os.fsync(stream.fileno())
-        # The directory entry must also survive an app crash before adoption.
-        descriptor = os.open(folder, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        # POSIX additionally syncs the directory entry; Windows retains the
+        # complete, file-synced recovery snapshot without a directory-fsync claim.
+        _fsync_recovery_directory(folder)
 
     @app.get("/api/batch/{batch}/image/{name}/model-preview/recovery")
     def list_model_recovery(batch: str, name: str):
