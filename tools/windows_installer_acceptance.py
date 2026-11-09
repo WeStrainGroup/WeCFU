@@ -343,7 +343,9 @@ def main():
         api_output = out / 'installed-api'
         receipt['api_process'] = run_owned([sys.executable, '-B', str(REPO/'tools/desktop_acceptance.py'),
             '--bundle', str(installed_bundle), '--output', str(api_output)], out, deadline, API_SECONDS, 'installed-api')
-        result = json.loads((api_output/'result.json').read_text())
+        # The acceptance writer emits UTF-8, including the deliberately Unicode
+        # installation path. Windows' legacy locale decoder is not its format.
+        result = json.loads((api_output/'result.json').read_text(encoding='utf-8'))
         manifest = manifest_document(raw_manifest)
         require(result['status'] == 'passed' and result['mode'] == 'two_image_real_SAM'
                 and result['explicit_synthetic'] is True and result['real_model_requests'] == 2

@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import shutil
 import time
 from types import SimpleNamespace
 
@@ -201,3 +202,68 @@ def test_nsis_identity_pins_both_lock_and_actual_cli_version(tmp_path):
         before=modified.read_bytes();modified.write_bytes(before.replace(b'2.12.4',b'2.12.5'))
         with pytest.raises(RuntimeError,match='Unreviewed'):accept.check_bundler_version(tmp_path)
         modified.write_bytes(before)
+
+
+@pytest.mark.parametrize('mutation', ['none', 'retry', 'evidence'])
+def test_complete_installed_receipt_handles_utf8_under_windows_legacy_locale(tmp_path, monkeypatch, mutation):
+    """Exercise the final gate with fake installation/inference, including Unicode.
+
+    This deliberately models CP1252 defaults on every host, so a macOS developer
+    cannot accidentally accept a locale-dependent receipt reader again.
+    """
+    source = tmp_path/'source'; source.mkdir(); raw = make_payload(source)
+    installer = tmp_path/'setup.exe'; installer.write_bytes(b'synthetic installer')
+    built = tmp_path/'wecfu-desktop.exe'
+    built.write_bytes(b'MZ'+accept.UNKNOWN_BUNDLE_MARKER+b'synthetic executable')
+    install_parent = tmp_path/'WeCFU install 验证'; install_parent.mkdir()
+    destination = install_parent/'WeCFU isolated'
+    output = tmp_path/'evidence'
+    lock = tmp_path/'lock.json'; lock.write_text('{}', encoding='utf-8')
+
+    monkeypatch.setattr(accept.sys, 'platform', 'win32')
+    monkeypatch.setitem(accept.sys.modules, 'winreg', Registry())
+    monkeypatch.setattr(accept, 'preflight_existing', lambda *args: {'registrations': [], 'present_paths': []})
+    monkeypatch.setattr(accept, 'check_bundler_version', lambda repo: [lock])
+    monkeypatch.setattr(accept.tempfile, 'mkdtemp', lambda **kwargs: str(install_parent))
+    monkeypatch.setattr(accept, 'nsis_command', lambda exe, dest: 'synthetic installer command')
+    monkeypatch.setattr(accept.sys, 'argv', ['script', '--installer', str(installer), '--built-exe', str(built),
+        '--source-bundle', str(source), '--output', str(output)])
+    real_read = Path.read_text
+    def legacy_read(path, encoding=None, errors=None):
+        return real_read(path, encoding=encoding or 'cp1252', errors=errors)
+    monkeypatch.setattr(Path, 'read_text', legacy_read)
+
+    def simulated_process(command, folder, deadline, cap, name):
+        if name == 'installer':
+            destination.mkdir()
+            shutil.copytree(source, destination/'bundle')
+            (destination/built.name).write_bytes(built.read_bytes().replace(accept.UNKNOWN_BUNDLE_MARKER, accept.NSIS_BUNDLE_MARKER))
+        else:
+            assert name == 'installed-api'
+            api = output/'installed-api'; api.mkdir()
+            evidence = api/'synthetic.log'; evidence.write_bytes(b'completed synthetic workflow')
+            result = {
+                'status': 'passed', 'mode': 'two_image_real_SAM', 'explicit_synthetic': True,
+                'real_model_requests': 2, 'real_model_request_attempts': 3 if mutation == 'retry' else 2,
+                'manifest_sha256': hashlib.sha256(raw).hexdigest(), 'app_version': 'synthetic',
+                'actual_runtime': {'executable': str(destination/'bundle/runtime/python.exe')},
+                'files': {evidence.name: hashlib.sha256(evidence.read_bytes()).hexdigest()},
+            }
+            encoded = json.dumps(result, ensure_ascii=False).encode('utf-8')
+            with pytest.raises(UnicodeDecodeError): encoded.decode('cp1252')
+            (api/'result.json').write_bytes(encoded)
+            if mutation == 'evidence': evidence.write_bytes(b'changed after receipt')
+        return {'exit_code': 0, 'seconds': 0, 'timeout_seconds': cap}
+    monkeypatch.setattr(accept, 'run_owned', simulated_process)
+
+    assert accept.main() == (0 if mutation == 'none' else 1)
+    receipt = json.loads((output/'result.json').read_text(encoding='utf-8'))
+    assert receipt['installed_payload']['files'] == 3
+    assert receipt['installed_exe']['sha256'] == receipt['installed_exe']['expected_sha256']
+    if mutation == 'none':
+        assert receipt['status'] == 'passed'
+        assert '验证' in receipt['installed_api_receipt']['actual_runtime']['executable']
+    else:
+        assert receipt['status'] == 'failed'
+        assert receipt['error_type'] == 'RuntimeError'
+        assert ('required complete' if mutation == 'retry' else 'evidence changed') in receipt['error']

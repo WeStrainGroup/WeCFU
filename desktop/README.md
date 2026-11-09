@@ -119,6 +119,10 @@ An ad-hoc signed candidate has no Developer ID identity or notarization. Passing
 these checks establishes package integrity, not Gatekeeper approval for public
 distribution. Keep the signature and installation results with the candidate.
 
+Windows candidates use NSIS zlib compression to keep rebuilds practical. This
+changes installer compression only; the installed resource inventory and file
+hashes must still match the complete bundle.
+
 ## Acceptance and release
 
 `tools/desktop_acceptance.py` performs bounded, actual bundled inference on two
