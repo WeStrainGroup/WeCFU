@@ -143,6 +143,22 @@ def test_continuation_never_invokes_model_workflow_and_starts_two_empty_hosts(tm
     assert len(hosts)==2 and all(h.cleanup['exit_code']==0 for h in hosts)
 
 
+def test_temp_cleanup_only_allows_empty_non_session_torch_import_directory(tmp_path,monkeypatch):
+    cache=tmp_path/'torchinductor_synthetic';cache.mkdir()
+    assert accept.remaining_session_entries(tmp_path)==([],['torchinductor_synthetic'])
+    workspace=tmp_path/'wecfu-desktop-synthetic';workspace.mkdir()
+    assert accept.remaining_session_entries(tmp_path)==(['wecfu-desktop-synthetic'],['torchinductor_synthetic'])
+    workspace.rmdir()
+    (cache/'source.image').write_bytes(b'synthetic')
+    assert accept.remaining_session_entries(tmp_path)==(['torchinductor_synthetic'],[])
+    (cache/'source.image').unlink();cache.rmdir()
+    (tmp_path/'unknown-empty').mkdir()
+    assert accept.remaining_session_entries(tmp_path)==(['unknown-empty'],[])
+    (tmp_path/'unknown-empty').rmdir();cache.mkdir()
+    monkeypatch.setattr(Path,'is_junction',lambda path:path==cache,raising=False)
+    assert accept.remaining_session_entries(tmp_path)==(['torchinductor_synthetic'],[])
+
+
 def test_bundle_byte_verification_rejects_changed_or_escaping_files(tmp_path):
     (tmp_path/'app').mkdir();source=tmp_path/'app/entry.py';source.write_bytes(b'synthetic')
     manifest={'schema_version':1,'files':{'app/entry.py':hashlib.sha256(b'synthetic').hexdigest()}}

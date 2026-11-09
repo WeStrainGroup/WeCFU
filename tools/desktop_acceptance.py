@@ -117,6 +117,19 @@ def multipart(files, batch):
     return b''.join(parts), 'multipart/form-data; boundary='+boundary
 
 
+def remaining_session_entries(temp_root):
+    """Distinguish the empty directory created by Torch import from user data."""
+    blocking, empty_runtime_directories = [], []
+    for path in sorted(temp_root.iterdir()):
+        if (path.name.startswith('torchinductor_') and not path.is_symlink()
+                and not getattr(path, 'is_junction', lambda: False)()
+                and path.is_dir() and not any(path.iterdir())):
+            empty_runtime_directories.append(path.name)
+        else:
+            blocking.append(path.name)
+    return blocking, empty_runtime_directories
+
+
 class Client:
     def __init__(self, origin, folder):
         self.origin, self.folder = origin, folder
@@ -213,8 +226,9 @@ class Host:
         code=self.process.wait(timeout=20)
         self.thread.join(3)
         self.stderr.flush()
-        remaining=sorted(p.name for p in self.temp_root.iterdir())
+        remaining, empty_runtime=remaining_session_entries(self.temp_root)
         self.cleanup={'exit_code':code,'seconds':time.monotonic()-before,'remaining_temp_entries':remaining,
+                      'empty_non_session_runtime_directories':empty_runtime,
                       'stdout_reader_stopped':not self.thread.is_alive()}
         require(code==0,'Desktop graceful shutdown failed')
         require(not remaining,'Desktop left temporary session data behind')
@@ -420,6 +434,8 @@ def close_host(host, receipt):
     if hasattr(host, 'client'):
         receipt['real_model_request_attempts'] = max(receipt.get('real_model_request_attempts', 0), host.client.preview_attempts)
         receipt['real_model_requests'] = max(receipt.get('real_model_requests', 0), host.client.preview_success_responses)
+    if getattr(host, 'cleanup', None):
+        receipt['last_host_cleanup'] = deepcopy(host.cleanup)
     try:
         host.close()
     except Exception as exc:

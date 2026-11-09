@@ -33,6 +33,9 @@ jobs:
         run: cargo +stable fmt --manifest-path desktop/src-tauri/Cargo.toml --check
       - name: Compile shell and verify native Job and pipe ownership
         run: |
+          # Tauri validates the resource directory during cargo test. The real
+          # portable payload is built below; never substitute placeholder files.
+          New-Item -ItemType Directory -Force desktop/bundle | Out-Null
           $env:WECFU_TEST_PYTHON = (Get-Command python).Source
           cargo +stable test --manifest-path desktop/src-tauri/Cargo.toml --locked
       - name: Prepare acceptance driver
