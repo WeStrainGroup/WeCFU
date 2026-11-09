@@ -36,7 +36,7 @@ data/
 *.pth
 
 # Native desktop resources are built from pinned public dependencies.
-desktop/bundle/
+desktop/bundle
 desktop/node_modules/
-desktop/src-tauri/target/
+desktop/src-tauri/target
 desktop/src-tauri/gen/
