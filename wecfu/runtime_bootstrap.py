@@ -17,6 +17,7 @@ import sys
 import time
 import tarfile
 import venv
+from . import platform_runtime
 
 # Keep the tested numeric/runtime versions identical to the model extra.
 REQUIREMENTS = (
@@ -36,9 +37,9 @@ def runtime_directory(cache):
 
 def prepared_python(cache):
     folder = runtime_directory(cache)
-    python = folder/'bin/python'
+    python = platform_runtime.venv_python(folder)
     receipt = folder/'verified-runtime.json'
-    if folder.is_symlink() or python.is_symlink() or receipt.is_symlink():
+    if any(platform_runtime.is_link(path) for path in (folder, python, receipt)):
         return None
     try:
         record = json.loads(receipt.read_text())
@@ -103,18 +104,8 @@ print(json.dumps({'versions':versions,'device':device,'python':sys.executable}))
 
 @contextlib.contextmanager
 def _setup_lock(cache):
-    # flock releases on interruption/crash; no stale lock file can block startup.
-    import fcntl
-    cache.mkdir(parents=True, exist_ok=True)
-    with (cache/'.ultra-setup.lock').open('a') as stream:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError('Ultra is being prepared by another WeCFU process. Retry after it finishes.') from exc
-        try:
-            yield
-        finally:
-            fcntl.flock(stream, fcntl.LOCK_UN)
+    with platform_runtime.exclusive_file_lock(Path(cache)/'.ultra-setup.lock'):
+        yield
 
 
 def _activate(python, device):
@@ -130,20 +121,39 @@ def _activate(python, device):
 
 
 def _ensure_ultra():
-    if sys.platform not in ('darwin', 'linux'):
-        raise RuntimeError('Ultra currently supports macOS and Linux. Use Lite or Custom on this system.')
+    if sys.platform not in ('darwin', 'linux', 'win32'):
+        raise RuntimeError('Ultra supports macOS, Linux and Windows. Use Lite or Custom on this system.')
+    if sys.platform == 'win32' and (platform.machine().lower() not in ('amd64', 'x86_64')
+                                  or os.environ.get('WECFU_SAM_DEVICE', 'cpu') != 'cpu'):
+        raise RuntimeError('Windows Ultra requires a 64-bit x64 CPU runtime')
     if sys.version_info[:2] != (3, 12):
-        raise RuntimeError('Ultra setup requires Python 3.12. Install the current Conda package in a Python 3.12 environment.')
+        raise RuntimeError('Ultra setup requires Python 3.12. Use the bundled desktop runtime or a Python 3.12 environment.')
     if os.environ.get('WECFU_ENABLE_SAM2', '1') == '0':
         return {'status':'disabled'}
     from . import runtime_paths, setup_models
     cache = runtime_paths.MODEL_HOME
     env = isolated_environment(os.environ)
     external = os.environ.get('WECFU_MODEL_PYTHON')
+    if os.environ.get('WECFU_DESKTOP_MANAGED') == '1':
+        # A desktop bundle is read-only and complete. Never install packages,
+        # acquire a cache-writing setup lock, or silently fall back to host Python.
+        values = [os.environ.get(key) for key in ('WECFU_MODEL_HOME', 'WECFU_MODEL_PYTHON', 'WECFU_CV_PYTHON')]
+        if any(not value or not Path(value).is_absolute() for value in values):
+            raise RuntimeError('Desktop runtime requires explicit absolute model/CV Python and asset paths')
+        model, cv = map(Path, values[1:])
+        if any(not path.is_file() or platform_runtime.is_link(path) for path in (model, cv)):
+            raise RuntimeError('Bundled desktop Python is missing or linked; repair the installation')
+        setup_models.check(cache)
+        proof = _probe(model, cache, env=env)
+        if cv != model:
+            _probe(cv, cache, env=env)
+        _activate(model, proof['device'])
+        return {'status':'ready', 'runtime_id':RUNTIME_ID, 'model_python':str(model),
+                'device':proof['device'], 'desktop_managed':True, 'installation_performed':False}
     folder = runtime_directory(cache)
-    python = Path(external).expanduser().absolute() if external else folder/'bin/python'
-    for managed in (cache/'sam2', cache/'runtime', folder, folder/'bin', python if not external else folder):
-        if managed.is_symlink():
+    python = Path(external).expanduser().absolute() if external else platform_runtime.venv_python(folder)
+    for managed in (cache/'sam2', cache/'runtime', folder, platform_runtime.venv_python(folder).parent, python if not external else folder):
+        if platform_runtime.is_link(managed):
             raise RuntimeError('Ultra setup will not write through a managed symlink: '+str(managed))
     if (cache/'sam2').is_dir() and any(p.is_symlink() for p in (cache/'sam2').rglob('*')):
         raise RuntimeError('Ultra assets contain a symlink; setup did not replace it.')
@@ -171,7 +181,7 @@ def _ensure_ultra():
                     venv.EnvBuilder(with_pip=True, clear=False, symlinks=False).create(folder)
                 install_env = {**{k:v for k,v in env.items() if not k.startswith('PIP_')}, 'PIP_CONFIG_FILE':os.devnull, 'PIP_DISABLE_PIP_VERSION_CHECK':'1'}
                 base = [str(python), '-m', 'pip', '--isolated', 'install', '--index-url', 'https://pypi.org/simple']
-                if sys.platform == 'linux':
+                if sys.platform in ('linux', 'win32'):
                     _run([str(python), '-m', 'pip', '--isolated', 'install', '--index-url',
                           'https://download.pytorch.org/whl/cpu', 'torch==2.14.1', 'torchvision==0.29.1'], env=install_env)
                 _run(base + list(REQUIREMENTS), env=install_env)

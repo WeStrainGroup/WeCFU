@@ -7,20 +7,17 @@ and sampled child RSS; the SAM child additionally checks its MPS allocation.
 from __future__ import annotations
 
 from dataclasses import asdict
-import ctypes
-import errno
 import hashlib
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 from . import runtime_diagnostics
-from wecfu import runtime_paths
+from wecfu import runtime_paths, platform_runtime
 from wecfu.runtime_bootstrap import isolated_environment
 
 ENGINE = "sam2_local_v1"
@@ -69,47 +66,19 @@ def fingerprint(path):
 
 
 def sampled_rss(pid):
-    """Read resident bytes of this isolated single-process worker; fail closed."""
-    if sys.platform == "linux":
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1]) * 1024
-        raise RuntimeUnavailable("Cannot sample local model memory")
-    # Darwin's own-child task information avoids spawning ps in a sandbox.
-    class TaskInfo(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_uint64) for name in (
-            "virtual_size", "resident_size", "total_user", "total_system", "threads_user", "threads_system")]
-        _fields_ += [(name, ctypes.c_int32) for name in (
-            "policy", "faults", "pageins", "cow_faults", "messages_sent", "messages_received",
-            "syscalls_mach", "syscalls_unix", "csw", "threadnum", "numrunning", "priority")]
-    if sys.platform != "darwin" or ctypes.sizeof(TaskInfo) != 96:
-        raise RuntimeUnavailable("Unsupported local memory monitor")
-    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-    query = library.proc_pidinfo
-    query.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
-    query.restype = ctypes.c_int
-    info = TaskInfo()
-    ctypes.set_errno(0)
-    size = query(pid, 4, 0, ctypes.byref(info), ctypes.sizeof(info))
-    if size != ctypes.sizeof(info):
-        number = ctypes.get_errno()
-        if number == errno.ESRCH:
-            raise ProcessLookupError(pid)
-        raise RuntimeUnavailable("Local model memory monitor became unavailable")
-    if info.resident_size <= 0:
-        raise RuntimeUnavailable("Invalid local model memory sample")
-    return int(info.resident_size)
+    """Sample this owned worker using the platform's resident-memory API."""
+    try:
+        return platform_runtime.sampled_rss(pid)
+    except ProcessLookupError:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RuntimeUnavailable("Local model memory monitor became unavailable") from exc
 
 
 def stop_process(process):
-    if process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
     try:
-        process.wait(timeout=4)
-    except subprocess.TimeoutExpired as exc:
+        platform_runtime.stop_owned(process, timeout=4)
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         raise RuntimeUnavailable("Local model process could not be stopped") from exc
 
 
@@ -136,8 +105,8 @@ def run_stage(command, folder, deadline, env):
     process = None
     try:
         with log.open("xb") as output:
-            process = subprocess.Popen(command, cwd=REPO, env=env, stdout=output,
-                                       stderr=subprocess.STDOUT, start_new_session=True)
+            process = platform_runtime.spawn_owned(command, cwd=REPO, env=env, stdout=output,
+                                                   stderr=subprocess.STDOUT)
             try:
                 while process.poll() is None:
                     if time.monotonic() >= deadline:
@@ -179,8 +148,10 @@ class LocalSamProvider:
         self.last_timings = None
 
     def require_available(self):
-        if sys.platform not in ('darwin', 'linux'):
-            raise RuntimeUnavailable("Local SAM2/Fusion models require macOS or Linux; the core application remains available")
+        if sys.platform not in ('darwin', 'linux', 'win32'):
+            raise RuntimeUnavailable("Local SAM2 requires macOS, Linux or Windows; the core application remains available")
+        if sys.platform == 'win32' and (platform_runtime.platform_machine().lower() not in ('amd64', 'x86_64') or SAM_DEVICE != 'cpu'):
+            raise RuntimeUnavailable("Windows SAM2 requires the x64 CPU runtime")
         if not self.enabled:
             raise RuntimeUnavailable("Local SAM2 preview is not enabled")
         try:
@@ -281,7 +252,7 @@ class LocalSamProvider:
                     files = (SAM_PYTHON, CV_PYTHON, WORKER, AUTHORIZATION,
                              Path(__file__), Path(sam_warm_pool.__file__),
                              runtime_paths.PACKAGE_ROOT / "model_assets.json",
-                             Path(runtime_paths.__file__),
+                             Path(runtime_paths.__file__), Path(platform_runtime.__file__),
                              REPO / "wecfu/experiments/segmentation.py",
                              REPO / "wecfu/segment.py", REPO / "wecfu/plate.py")
                     return (pin, SOURCE_COMMIT, str(SOURCE.resolve()), SAM_DEVICE,

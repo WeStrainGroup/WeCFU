@@ -8,16 +8,18 @@ from pathlib import Path, PurePosixPath
 import posixpath
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import urllib.request
 from . import runtime_paths as paths
+from . import platform_runtime
 
 
 def _copy_verified(stream,destination,sha256,size):
     destination.parent.mkdir(parents=True,exist_ok=True)
     if destination.exists():
-        if destination.is_symlink() or destination.stat().st_size!=size or paths.digest(destination)!=sha256:
+        if platform_runtime.is_link(destination) or destination.stat().st_size!=size or paths.digest(destination)!=sha256:
             raise RuntimeError('Existing asset differs; it was not overwritten: '+str(destination))
         return
     fd,name=tempfile.mkstemp(prefix='.asset-',dir=destination.parent)
@@ -30,8 +32,12 @@ def _copy_verified(stream,destination,sha256,size):
                 h.update(block);out.write(block)
             out.flush();os.fsync(out.fileno())
         if total!=size or h.hexdigest()!=sha256:raise RuntimeError('Official asset digest or size differs')
-        # Link is exclusive and atomic; never replace an existing model.
-        os.link(temporary,destination)
+        # Windows rename refuses an existing destination (unlike POSIX rename).
+        # Both paths publish a verified regular file atomically without overwrite.
+        if sys.platform == 'win32':
+            os.rename(temporary,destination)
+        else:
+            os.link(temporary,destination)
     finally: temporary.unlink(missing_ok=True)
 
 
@@ -150,6 +156,8 @@ def runtime_check(cache, *, profile="sam"):
     """Check the configured model interpreter, without loading either model."""
     from .runtime_bootstrap import _probe, isolated_environment, package_import_prelude
     if profile == "sam":
+        if sys.platform == 'win32' and (platform_runtime.platform_machine().lower() not in ('amd64', 'x86_64') or paths.SAM_DEVICE != 'cpu'):
+            raise RuntimeError('Windows SAM2 requires the x64 CPU runtime')
         env = {**isolated_environment(os.environ),
                'PYTHONDONTWRITEBYTECODE':'1',
                'PYTHONNOUSERSITE':'1','WECFU_SAM_DEVICE':paths.SAM_DEVICE,'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1'}

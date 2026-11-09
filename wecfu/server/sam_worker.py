@@ -12,7 +12,6 @@ import math
 import os
 from pathlib import Path
 import re
-import resource
 import select
 import sys
 import time
@@ -31,6 +30,7 @@ if __name__ == '__main__':
 from wecfu.server.sam_runtime import (CHECKPOINT, COMPONENT_PARAMS, ENGINE, MODEL_SETTINGS,
                                      MODEL_SHA256, PLATE_INSET, RECIPE_ID, RSS_LIMIT_BYTES,
                                      SOURCE, MAX_JSON_BYTES, SAM_DEVICE)
+from wecfu.platform_runtime import self_peak_rss
 
 
 def no_network(event, args):
@@ -147,7 +147,7 @@ def infer(folder, request, *, model_cache=None):
     if SAM_DEVICE == "mps": torch.mps.set_per_process_memory_fraction(.32)
 
     def memory_check():
-        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024)
+        rss = self_peak_rss()
         if rss > RSS_LIMIT_BYTES or (SAM_DEVICE == "mps" and torch.mps.driver_allocated_memory() > RSS_LIMIT_BYTES):
             raise RuntimeError("SAM2 worker exceeds 4 GiB memory budget")
 
@@ -252,6 +252,48 @@ PROTOCOL_MAX_BYTES = 4096
 # interpreter's full 120-second request before this child's own idle backstop.
 PROTOCOL_IDLE_SECONDS = 210.0
 PROTOCOL_MAX_REQUESTS = 32
+WINDOWS_PIPES = os.name == 'nt'
+
+
+def _windows_pipe_peeker(descriptor):
+    """Peek an anonymous Windows pipe without blocking or creating a thread."""
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    msvcrt.setmode(descriptor, os.O_BINARY)
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    peek = kernel.PeekNamedPipe
+    peek.argtypes = (wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                     ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
+                     ctypes.POINTER(wintypes.DWORD))
+    peek.restype = wintypes.BOOL
+    handle = msvcrt.get_osfhandle(descriptor)
+
+    def available():
+        size = wintypes.DWORD()
+        if not peek(handle, None, 0, None, ctypes.byref(size), None):
+            error = ctypes.get_last_error()
+            if error in (109, 232, 233):  # Broken pipe, no data, disconnected pipe.
+                return None
+            raise OSError(error, 'Cannot inspect Windows worker pipe')
+        return size.value
+    return available
+
+
+def _redirect_stdout_to_stderr():
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    if WINDOWS_PIPES:
+        # _dup2 redirects CRT/Python writes, but native Windows libraries may
+        # use GetStdHandle instead. Keep those writes out of the protocol too.
+        import ctypes
+        from ctypes import wintypes
+        import msvcrt
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        set_handle = kernel.SetStdHandle
+        set_handle.argtypes = (wintypes.DWORD, wintypes.HANDLE)
+        set_handle.restype = wintypes.BOOL
+        if not set_handle(-11, msvcrt.get_osfhandle(sys.stderr.fileno())):
+            raise OSError(ctypes.get_last_error(), 'Cannot isolate Windows worker output')
 
 
 class ProtocolReader:
@@ -260,6 +302,7 @@ class ProtocolReader:
     def __init__(self, descriptor):
         self.descriptor = descriptor
         self.pending = b""
+        self.peek = _windows_pipe_peeker(descriptor) if WINDOWS_PIPES else None
 
     def read(self, idle_seconds):
         deadline = time.monotonic() + idle_seconds
@@ -273,9 +316,22 @@ class ProtocolReader:
             if len(self.pending) >= PROTOCOL_MAX_BYTES:
                 raise RuntimeError("Worker command exceeds protocol budget")
             remaining = deadline - time.monotonic()
-            if remaining <= 0 or not select.select([self.descriptor], [], [], remaining)[0]:
+            if remaining <= 0:
                 return None
-            chunk = os.read(self.descriptor, PROTOCOL_MAX_BYTES + 1 - len(self.pending))
+            size = PROTOCOL_MAX_BYTES + 1 - len(self.pending)
+            if self.peek is not None:
+                available = self.peek()
+                if available is None:
+                    if self.pending:
+                        raise RuntimeError("Incomplete worker command")
+                    return None
+                if not available:
+                    time.sleep(min(.01, remaining))
+                    continue
+                size = min(size, available)
+            elif not select.select([self.descriptor], [], [], remaining)[0]:
+                return None
+            chunk = os.read(self.descriptor, size)
             if not chunk:
                 if self.pending:
                     raise RuntimeError("Incomplete worker command")
@@ -308,8 +364,11 @@ def serve(mode, *, idle_seconds=PROTOCOL_IDLE_SECONDS, max_requests=PROTOCOL_MAX
     # Preserve a dedicated protocol fd, then route Python and native-library
     # stdout to stderr. Incidental output cannot corrupt the controller reply.
     sys.stdout.flush()
+    if WINDOWS_PIPES:
+        import msvcrt
+        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
     with os.fdopen(os.dup(sys.stdout.fileno()), "wb", buffering=0) as output:
-        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+        _redirect_stdout_to_stderr()
         for _ in range(max_requests):
             token = None
             try:

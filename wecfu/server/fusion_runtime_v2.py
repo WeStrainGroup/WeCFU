@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
-import hashlib,json,os,tempfile,time
+import hashlib,json,os,sys,tempfile,time
 from . import sam_runtime, runtime_diagnostics
 from .fusion_dino import dino_provider,dino_contract
 
@@ -17,7 +17,7 @@ FILTER=HERE/'fusion_filter_v2.json'
 WORKER=HERE/'fusion_worker_v2.py'
 FILTER_SHA256='7542a3b5f3bfe28e7077ee478b944044daf56246a463ec8e9507209ea4c42570'
 MODEL_SHA256='fc7ab851da6d09daf36bc49ac1d6e2aec52a6a04f982c588017704805f638209'
-DETECTOR_CONTRACT_SHA256='d63350bf0033776eb13a519a717d4dd7ade08eed552d20ccc393e8c663b21275'
+DETECTOR_CONTRACT_SHA256='77f805086b2b7b5c8edd7b6b645f81f5efb3262cbea5fbae534e4193eebb762f'
 SOURCE_FILES=('fusion_worker_v2.py','fusion_dino/fusion_math_v2.py',
               'fusion_dino/fusion_math.py','fusion_dino/appearance_runtime.py')
 RuntimeUnavailable=sam_runtime.RuntimeUnavailable
@@ -47,6 +47,7 @@ class LocalFusionProvider:
 
     def require_available(self):
         require(self.enabled,'Fusion v2 is disabled; no fallback model will run')
+        require(sys.platform != 'win32', 'Legacy Fusion v2 is unavailable on Windows; use Ultra or Lite')
         try:
             authority=dino_contract.read_json(AUTHORIZATION)
             require(authority.get('product_runtime') is True and authority.get('engine')==ENGINE and authority.get('recipe_id')==RECIPE_ID,'Fusion v2 product manifest differs')

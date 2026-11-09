@@ -56,6 +56,28 @@ def test_two_buffered_requests_are_processed_in_order_and_native_stdout_is_separ
     assert result.stderr.count(b"native noise") == 2
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Actual Win32 native standard-handle acceptance')
+def test_native_windows_standard_handle_output_stays_out_of_protocol(tmp_path):
+    folder = recipe(tmp_path / 'scratch')
+    extra = '''
+def native_noise():
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.GetStdHandle.argtypes = (wintypes.DWORD,)
+    kernel.GetStdHandle.restype = wintypes.HANDLE
+    kernel.WriteFile.argtypes = (wintypes.HANDLE, wintypes.LPCVOID, wintypes.DWORD,
+                                ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID)
+    kernel.WriteFile.restype = wintypes.BOOL
+    count = wintypes.DWORD()
+    data = b'Windows native noise\\n'
+    assert kernel.WriteFile(kernel.GetStdHandle(-11), data, len(data), ctypes.byref(count), None)
+'''
+    result, replies = subprocess_worker([command(folder)], handler='native_noise()', extra=extra)
+    assert replies == [dict(id='test', ok=True)]
+    assert b'Windows native noise' in result.stderr
+
+
 def test_request_bound_stops_without_consuming_later_command(tmp_path):
     folder = recipe(tmp_path / "scratch")
     _, replies = subprocess_worker([command(folder)] * 3, maximum=2)
@@ -134,7 +156,7 @@ def synthetic_inference(monkeypatch, *, fail=False):
     monkeypatch.setattr(runtime_paths, "check_versions", lambda: None)
     monkeypatch.setattr(runtime_paths, "verify_sam_source", lambda: None)
     monkeypatch.setattr(worker, "SAM_DEVICE", "cpu")
-    monkeypatch.setattr(worker.resource, "getrusage", lambda _: SimpleNamespace(ru_maxrss=0))
+    monkeypatch.setattr(worker, "self_peak_rss", lambda: 0)
     monkeypatch.setattr(worker, "source", lambda folder, _: folder)
     monkeypatch.setattr(worker, "checked_rgb", lambda _: np.zeros((2, 3, 3), np.uint8))
     monkeypatch.setattr(worker, "load", lambda folder, _: dict(width=3, height=2,

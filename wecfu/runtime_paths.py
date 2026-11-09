@@ -15,15 +15,14 @@ import platform
 from pathlib import Path
 import sys
 import sysconfig
+from . import platform_runtime
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
 def model_home():
     if os.environ.get('WECFU_MODEL_HOME'):
         return Path(os.environ['WECFU_MODEL_HOME']).expanduser().resolve()
-    if sys.platform == 'darwin':
-        return Path.home() / 'Library/Caches/WeCFU/models'
-    return Path(os.environ.get('XDG_CACHE_HOME', str(Path.home()/'.cache'))) / 'wecfu/models'
+    return platform_runtime.default_model_home()
 
 MODEL_HOME = model_home()
 from .runtime_bootstrap import prepared_python

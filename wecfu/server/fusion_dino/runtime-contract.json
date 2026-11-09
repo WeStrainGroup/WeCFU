@@ -36,7 +36,8 @@
     "dino_contract.py": "eeda6b49ab6afaf395de697fa2781d4110f661a9fdedbd1a832b67f668c138b3"
   },
   "package_files_sha256": {
-    "runtime_paths.py": "605e9c1afac3c74eb590b0579b08b3bfd9bd4ecf0c5453972cb33007b0eefb13",
-    "model_assets.json": "1faccbbc9906b51e38f3817c1f59c38daef9d44751f91db062cb7e7738bda653"
+    "runtime_paths.py": "cc81c89ce8cbdf0105dce42a3d5caf8abdcc977db70f526fe0d57cca91d14cc2",
+    "model_assets.json": "1faccbbc9906b51e38f3817c1f59c38daef9d44751f91db062cb7e7738bda653",
+    "platform_runtime.py": "148c9c26819f7947af1011b39db3ce6ec8dff80b0d7f61dc13cd5368cef82462"
   }
 }

@@ -1,0 +1,66 @@
+name: Windows desktop candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/desktop-native]
+    paths:
+      - 'desktop/**'
+      - 'wecfu/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.github/workflows/desktop-shell-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-shell:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+      - name: Check formatting
+        run: cargo +stable fmt --manifest-path desktop/src-tauri/Cargo.toml --check
+      - name: Compile shell and verify native Job and pipe ownership
+        run: |
+          $env:WECFU_TEST_PYTHON = (Get-Command python).Source
+          cargo +stable test --manifest-path desktop/src-tauri/Cargo.toml --locked
+      - name: Prepare acceptance driver
+        run: python -m pip install pytest numpy pillow
+      - name: Verify native backend transport and shutdown
+        run: python tools/desktop_acceptance.py --transport-only --output desktop-acceptance/transport
+      - name: Build fixed portable Python, application and model resources
+        run: python tools/build_desktop_resources.py --output desktop/bundle --version 1.3.0-rc.1
+      - name: Verify two synthetic images with the real bundled Ultra model
+        run: python tools/desktop_acceptance.py --bundle desktop/bundle --output desktop-acceptance/model
+      - name: Install local desktop build CLI
+        run: npm ci --prefix desktop
+      - name: Build Windows installer candidate
+        run: npm --prefix desktop run build -- --bundles nsis --config src-tauri/tauri.windows.conf.json
+      - name: Preserve acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-acceptance
+          path: desktop-acceptance/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Preserve installer for manual clean-machine acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeCFU-1.3.0-rc.1-windows-x64-candidate
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7
+      # Artifacts are candidates, not published releases. Windows 11 UI, drag/drop,
+      # exports and clean-machine installation still require manual acceptance.

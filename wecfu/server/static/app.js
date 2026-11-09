@@ -2111,6 +2111,13 @@ async function applyServerConfig() {
   }
 }
 window.addEventListener('DOMContentLoaded', async () => {
+  // The native launch capability has already become an HttpOnly session cookie.
+  // Keep it out of copied links and navigation history.
+  if (window.location?.search?.includes('desktop_session=') && window.history?.replaceState) {
+    const location = new URL(window.location.href);
+    location.searchParams.delete('desktop_session');
+    window.history.replaceState(null, '', location.pathname + location.search + location.hash);
+  }
   applyI18n(); populateLangSelect();
   try { $('p-preview').checked = localStorage.getItem('wecfu.preview.enabled') !== 'false'; } catch (_) { $('p-preview').checked = true; }
   try { $('reference-annotator').value = localStorage.getItem('wecfu.reference.annotator') || ''; } catch (_) { /* Optional reviewer preference. */ }

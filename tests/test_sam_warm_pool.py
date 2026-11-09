@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import signal
 import sys
 import threading
 import time
@@ -10,6 +9,7 @@ import time
 import pytest
 
 from wecfu.server import sam_warm_pool as warm
+from wecfu.platform_runtime import stop_owned
 
 
 FAKE = r'''
@@ -33,23 +33,32 @@ for line in sys.stdin:
     if mode == 'wrong_id': result['id'] = 'wrong'
     if mode == 'failure': result = {'id':request['id'],'ok':False,'error':'synthetic failure'}
     if mode == 'extra': print(json.dumps(result)+'\n'+json.dumps(result), flush=True); continue
+    if mode == 'split':
+        data = json.dumps(result)
+        sys.stdout.write(data[:10]); sys.stdout.flush(); time.sleep(.02)
+        print(data[10:], flush=True); continue
     print(json.dumps(result), flush=True)
 '''
 
 
 def stop(process):
-    if process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    process.wait(timeout=2)
+    stop_owned(process, timeout=2)
 
 
-@pytest.fixture
-def harness(tmp_path):
+@pytest.fixture(params=['selector', 'threaded'])
+def harness(tmp_path, request, monkeypatch):
+    if os.name == 'nt' and request.param == 'selector':
+        pytest.skip('Windows anonymous pipes cannot be selected')
+    monkeypatch.setattr(warm, 'WINDOWS_PIPES', request.param == 'threaded')
     worker = tmp_path/'fake_worker.py'; worker.write_text(FAKE)
     pool = warm.WarmSamPool()
+    all_children = []
+    original_spawn = pool._spawn
+    def tracked_spawn(*args):
+        child = original_spawn(*args)
+        all_children.append(child)
+        return child
+    monkeypatch.setattr(pool, '_spawn', tracked_spawn)
     sequence = 0
     def run(*, mode='', pins='same', timeout=3, **changes):
         nonlocal sequence
@@ -63,7 +72,10 @@ def harness(tmp_path):
         params.update(changes)
         return pool.run(**params), folder
     yield pool, run
+    threads = [t for c in all_children
+               for t in getattr(c.get('transport'), 'threads', [])]
     pool.close()
+    assert all(not t.is_alive() for t in threads)
 
 
 def pids(pool):
@@ -187,12 +199,88 @@ def test_recycle_before_protocol_limit_avoids_flushed_reply_exit_race(harness):
 def test_unconfirmed_stop_permanently_closes_pool(harness):
     pool,run=harness
     run();old=pids(pool)
-    def failed(process):stop(process);raise RuntimeError('synthetic stop failure')
+    def failed(process):raise RuntimeError('synthetic stop failure')
     with pytest.raises(warm.WarmWorkerError,match='could not be stopped'):
         run(pins='new',stop_process=failed)
-    assert pool._closed and all(p.poll() is not None for p in old.values())
+    assert pool._closed and pids(pool) == old
     with pytest.raises(warm.WarmWorkerError,match='closed'):run()
     # Subsequent explicit cleanup may confirm termination, but cannot reopen
     # a pool whose earlier stop was unconfirmed.
     pool._stop=stop;pool.shutdown()
     assert pool.children=={} and pool._closed
+    assert all(p.poll() is not None for p in old.values())
+
+
+def test_fragmented_reply_is_assembled_with_the_same_protocol_limits(harness):
+    pool, run = harness
+    details, _ = run(mode='split')
+    assert details['worker_reused'] is False
+    assert pool.children['infer']['commands'] == 1
+
+
+def test_threaded_blocked_write_obeys_request_deadline_and_releases_threads(harness, monkeypatch):
+    pool, run = harness
+    if not warm.WINDOWS_PIPES:
+        pytest.skip('Only the Windows pipe path has a blocking writer thread')
+    release = threading.Event()
+    entered = threading.Event()
+    original = os.write
+    def blocked_write(descriptor, data):
+        if threading.current_thread().name.endswith('-stdin'):
+            entered.set()
+            release.wait(2)
+            raise BrokenPipeError('synthetic blocked writer retired')
+        return original(descriptor, data)
+    def release_and_stop(process):
+        release.set()
+        stop(process)
+    monkeypatch.setattr(os, 'write', blocked_write)
+    started = time.monotonic()
+    try:
+        with pytest.raises(warm.WarmWorkerError, match='exceeded'):
+            run(timeout=.15, stop_process=release_and_stop)
+        assert entered.is_set() and time.monotonic() - started < 2
+        assert pool.children == {}
+    finally:
+        release.set()
+
+
+def test_threaded_pipe_write_failure_is_not_retried(harness, monkeypatch):
+    pool, run = harness
+    if not warm.WINDOWS_PIPES:
+        pytest.skip('Only the Windows pipe path has a writer thread')
+    original = os.write
+    attempts = []
+    def failed_write(descriptor, data):
+        if threading.current_thread().name.endswith('-stdin'):
+            attempts.append(data)
+            raise BrokenPipeError('synthetic writer failure')
+        return original(descriptor, data)
+    monkeypatch.setattr(os, 'write', failed_write)
+    with pytest.raises(warm.WarmWorkerError, match='write failed'):
+        run()
+    assert len(attempts) == 1 and pool.children == {}
+
+
+def test_thread_cleanup_retry_does_not_stop_a_released_windows_job_twice(harness, monkeypatch):
+    pool, run = harness
+    if not warm.WINDOWS_PIPES:
+        pytest.skip('Only the Windows pipe path owns IO threads')
+    stopped = []
+    def tracked_stop(process):
+        stopped.append(process.pid)
+        stop(process)
+    run(stop_process=tracked_stop)
+    cv = pool.children['cv']
+    transport = cv['transport']
+    original = transport.close
+    def delayed_join():
+        raise warm.WarmWorkerError('synthetic delayed thread join')
+    monkeypatch.setattr(transport, 'close', delayed_join)
+    with pytest.raises(warm.WarmWorkerError, match='could not be stopped'):
+        pool.shutdown()
+    assert cv['stopped'] and cv['process'].poll() is not None and pool._closed
+    monkeypatch.setattr(transport, 'close', original)
+    pool.shutdown()
+    assert stopped.count(cv['process'].pid) == 1
+    assert pool.children == {} and not any(t.is_alive() for t in transport.threads)

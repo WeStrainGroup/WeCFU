@@ -21,7 +21,8 @@ def installed_layout(tmp_path_factory):
     root = tmp_path_factory.mktemp('installed-runtime-isolation')
     environment = root / 'model-environment'
     venv.EnvBuilder(with_pip=False, symlinks=False).create(environment)
-    python = environment / 'bin/python'
+    from wecfu.platform_runtime import venv_python
+    python = venv_python(environment)
     clean_env = {key: value for key, value in os.environ.items() if key not in ('PYTHONHOME', 'PYTHONPATH')}
     query = subprocess.run([str(python), '-c', 'import sysconfig; print(sysconfig.get_path("purelib"))'],
                            env=clean_env, cwd=root, capture_output=True, text=True, check=True, timeout=15)
@@ -34,6 +35,7 @@ def installed_layout(tmp_path_factory):
         'import numpy\nassert numpy.ORIGIN == "model", "host dependency leaked into app import"\n')
     (package / 'server/__init__.py').write_text('')
     shutil.copyfile(bootstrap.__file__, package / 'runtime_bootstrap.py')
+    shutil.copyfile(Path(bootstrap.__file__).parent / 'platform_runtime.py', package / 'platform_runtime.py')
     (package / 'runtime_paths.py').write_text('''from pathlib import Path
 import os
 from importlib.metadata import version

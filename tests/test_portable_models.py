@@ -63,7 +63,7 @@ def test_linux_exited_child_requires_bounded_exit_confirmation():
         with pytest.raises(process_monitor.LinuxRSSUnavailable):monitor.resident_bytes()
 
 
-def test_windows_core_imports_without_resource_and_models_fail_before_spawn():
+def test_windows_core_imports_without_resource_sam_reaches_assets_dino_still_rejects():
     import builtins,types
     source=Path(process_monitor.__file__).read_text()
     module=types.ModuleType('portable_monitor_without_resource');module.__file__=process_monitor.__file__
@@ -77,9 +77,17 @@ def test_windows_core_imports_without_resource_and_models_fail_before_spawn():
         with pytest.raises(ValueError,match='requires Darwin/Linux'):module.supervise(['never-spawn'])
         spawn.assert_not_called()
     from wecfu.server import sam_runtime
-    with mock.patch.object(sam_runtime.sys,'platform','win32'):
+    authority=mock.Mock()
+    authority.read_bytes.side_effect=sam_runtime.RuntimeUnavailable('synthetic assets deliberately unavailable')
+    with mock.patch.object(sam_runtime.sys,'platform','win32'), \
+         mock.patch.object(sam_runtime.platform_runtime,'platform_machine',return_value='AMD64'), \
+         mock.patch.object(sam_runtime,'SAM_DEVICE','cpu'), \
+         mock.patch.object(sam_runtime,'AUTHORIZATION',authority), \
+         mock.patch.dict('os.environ',{'WECFU_ENABLE_SAM2':'1'}):
         capability=sam_runtime.LocalSamProvider().capability()
-        assert capability['available'] is False and 'macOS or Linux' in capability['reason']
+        assert capability['available'] is False
+        assert capability['reason']=='synthetic assets deliberately unavailable'
+        authority.read_bytes.assert_called_once_with()
 
 
 def test_real_owned_child_monitor_handshake():
