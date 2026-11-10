@@ -1917,14 +1917,61 @@ async function removeImage() {
 }
 
 let exportFormat = 'csv';
+let desktopExportReceipt = null;
+function desktopExportMode() { return window.__WECFU_DESKTOP_EXPORT__ === true; }
+function desktopExportInvoke(command, args) {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!desktopExportMode() || typeof invoke !== 'function') throw new Error(t('exportDesktopUnavailable'));
+  return Promise.resolve().then(() => invoke(command, args)).catch(error => {
+    const key = error === 'invalid_export_name' ? 'exportFileNameInvalid' : 'exportSaveFailed';
+    throw new Error(t(key), {cause: error});
+  });
+}
+function syncExportModal() {
+  const native = desktopExportMode(), saved = Boolean(desktopExportReceipt);
+  $('export-browser-location').hidden = native || Boolean(state.config?.web_mode);
+  $('export-desktop-location').hidden = !native;
+  $('export-form-fields').hidden = saved;
+  $('export-receipt').hidden = !saved;
+  $('btn-export-confirm').hidden = saved;
+  $('export-title').textContent = t(saved ? 'exportSaved' : 'exportTitle');
+  $('btn-export-cancel').textContent = t(saved ? 'helpClose' : 'exportCancel');
+  $('export-saved-path').textContent = desktopExportReceipt?.path || '';
+  const platform = window.__WECFU_DESKTOP_PLATFORM__;
+  $('btn-export-reveal').textContent = t(platform === 'macos' ? 'exportRevealFinder'
+    : platform === 'windows' ? 'exportRevealExplorer' : 'exportReveal');
+}
+function desktopExportCompletion(id, expectedPath) {
+  let finish, fail;
+  const promise = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+  // An arm/click failure can happen before the caller awaits this promise.
+  promise.catch(() => {});
+  const listener = event => {
+    const result = event.detail;
+    if (result?.id !== id) return;
+    if (result.status === 'saved' && result.path === expectedPath) finish({id, path: result.path});
+    else fail(new Error(t('exportSaveFailed')));
+  };
+  window.addEventListener('wecfu:desktop-export', listener);
+  const timer = setTimeout(() => fail(new Error(t('exportSaveUnconfirmed'))), 15 * 60 * 1000);
+  return {promise, dispose() { clearTimeout(timer); window.removeEventListener('wecfu:desktop-export', listener); }};
+}
+async function revealDesktopExport() {
+  if (!desktopExportReceipt || state.busy) return;
+  const button = $('btn-export-reveal'); button.disabled = true;
+  try { await desktopExportInvoke('desktop_export_reveal', {id: desktopExportReceipt.id}); }
+  catch (_) { throw new Error(t('exportRevealFailed')); }
+  finally { button.disabled = false; }
+}
 function openExportModal(format) {
   if (reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
-  exportFormat = format;
+  exportFormat = format; desktopExportReceipt = null; syncExportModal();
   const base = state.imageList.length === 1 ? state.imageList[0].name.replace(/\.[^.]+$/, '') : `wecfu_${state.batch}`;
   $('export-filename').value = `${base}.${format}`; $('export-backdrop').hidden = false;
   $('export-filename').focus(); $('export-filename').select();
 }
 async function pickSaveLocation() {
+  if (desktopExportMode()) return;
   if (!window.showDirectoryPicker) { setStatus(t('exportSaveLocationDefault')); return; }
   try { state.saveDirHandle = await window.showDirectoryPicker({mode: 'readwrite'}); $('export-location-btn').textContent = `${state.saveDirHandle.name}/`; }
   catch (error) { if (error.name !== 'AbortError') throw error; }
@@ -1934,12 +1981,18 @@ async function doExport() {
   const filename = $('export-filename').value.trim() || `wecfu_${state.batch}.${exportFormat}`;
   const finalName = filename.toLowerCase().endsWith(`.${exportFormat}`) ? filename : `${filename}.${exportFormat}`;
   state.busy = true; updateControls(); $('btn-export-confirm').disabled = true; $('btn-export-cancel').disabled = true;
-  setStatus(t(exportFormat === 'csv' ? 'exportPreparingCSV' : 'exportPreparingZIP'));
-  let writable;
+  let writable, nativeSave, completion, objectURL;
   try {
+    if (desktopExportMode()) {
+      setStatus(t('exportChooseLocation'));
+      nativeSave = await desktopExportInvoke('desktop_export_prepare', {fileName: finalName, locale: getLang()});
+      if (nativeSave === null) { setStatus(t('exportCancelled')); return; }
+      if (!nativeSave?.id || typeof nativeSave.path !== 'string' || !nativeSave.path) throw new Error(t('exportDesktopUnavailable'));
+    }
+    setStatus(t(exportFormat === 'csv' ? 'exportPreparingCSV' : 'exportPreparingZIP'));
     await flushEdits();
     const response = await request(`/api/batch/${enc(state.batch)}/export.${exportFormat}?filename=${enc(finalName)}`);
-    if (state.saveDirHandle && window.showDirectoryPicker) {
+    if (!nativeSave && state.saveDirHandle && window.showDirectoryPicker) {
       const file = await state.saveDirHandle.getFileHandle(finalName, {create: true}); writable = await file.createWritable();
     }
     const total = Number(response.headers.get('content-length'));
@@ -1957,12 +2010,31 @@ async function doExport() {
     }
     if (writable) { await writable.close(); writable = null; }
     else {
-      const url = URL.createObjectURL(new Blob(chunks)); const link = document.createElement('a');
-      link.href = url; link.download = finalName; document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      objectURL = URL.createObjectURL(new Blob(chunks));
+      if (nativeSave) {
+        completion = desktopExportCompletion(nativeSave.id, nativeSave.path);
+        await desktopExportInvoke('desktop_export_arm', {id: nativeSave.id, url: objectURL});
+      }
+      const link = document.createElement('a');
+      link.href = objectURL; link.download = finalName; document.body.appendChild(link); link.click(); link.remove();
+      if (nativeSave) {
+        setStatus(t('exportSaving'));
+        desktopExportReceipt = await completion.promise;
+        syncExportModal(); $('btn-export-reveal').focus();
+        setStatus(t('exportSaved'));
+        return;
+      }
     }
     setStatus(t(state.saveDirHandle ? 'exportSaved' : 'exportDownloadStarted')); $('export-backdrop').hidden = true;
   } finally {
+    completion?.dispose();
+    if (objectURL) {
+      const finishedURL = objectURL;
+      setTimeout(() => URL.revokeObjectURL(finishedURL), 60000);
+    }
+    if (nativeSave?.id && desktopExportReceipt?.id !== nativeSave.id) {
+      await desktopExportInvoke('desktop_export_cancel', {id: nativeSave.id}).catch(() => {});
+    }
     if (writable) await writable.abort().catch(() => {});
     state.busy = false; $('btn-export-confirm').disabled = false; $('btn-export-cancel').disabled = false; updateControls();
   }
@@ -1974,6 +2046,7 @@ function populateLangSelect() {
   $('lang-select').value = getLang();
   $('lang-select').addEventListener('change', event => {
     setLang(event.target.value); renderImageList(); updateControls(); syncSliders();
+    syncExportModal();
     $('help-body').innerHTML = t('helpBody');
     focusAfterSelect(event.currentTarget || $('lang-select'));
   });
@@ -2014,7 +2087,7 @@ function wireUpHandlers() {
     'btn-save-retry': flushEdits,
     'btn-export-csv': () => openExportModal('csv'), 'btn-export-zip': () => openExportModal('zip'),
     'btn-export-cancel': () => { if (!state.busy) $('export-backdrop').hidden = true; },
-    'btn-export-confirm': doExport, 'export-location-btn': pickSaveLocation,
+    'btn-export-confirm': doExport, 'export-location-btn': pickSaveLocation, 'btn-export-reveal': revealDesktopExport,
     'btn-help': openHelp, 'btn-help-close': closeHelp,
     'btn-reference-save': saveHumanReference, 'btn-reference-refresh': () => refreshReference({reloadImage: true}),
     'btn-reference-withdraw': withdrawHumanReference, 'btn-reference-export': exportHumanReferences,
@@ -2169,7 +2242,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     location.searchParams.delete('desktop_session');
     window.history.replaceState(null, '', location.pathname + location.search + location.hash);
   }
-  applyI18n(); populateLangSelect();
+  applyI18n(); populateLangSelect(); syncExportModal();
   try { $('p-preview').checked = localStorage.getItem('wecfu.preview.enabled') !== 'false'; } catch (_) { $('p-preview').checked = true; }
   try { $('reference-annotator').value = localStorage.getItem('wecfu.reference.annotator') || ''; } catch (_) { /* Optional reviewer preference. */ }
   configureReviewMode(); initializeWorkflow(); wireUpHandlers(); fillParams(DEFAULTS); updateControls(); draw();

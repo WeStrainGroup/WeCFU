@@ -11,8 +11,10 @@ release readiness. The existing Conda/web application version remains 1.2.3.
 - Ultra uses the existing algorithm and the fixed SAM recipe. Lite uses the
   existing algorithm alone. This desktop work does not train a model or change
   the numerical recipe.
-- Review or edit the rings and export CSV or the image/results archive. Exports
-  are saved to Downloads, with a new filename if the chosen name already exists.
+- Review or edit the rings and export CSV or the image/results archive. The
+  system Save As dialog lets you choose the filename and destination. After
+  saving, the app shows the complete path and a button to reveal the file in
+  Finder or File Explorer. Cancelling the dialog does not generate an export.
 - Each launch starts an empty temporary workspace. Export before closing. The
   original imported photographs are not edited or deleted.
 - The complete inference environment is bundled. Recognition runs locally and
@@ -41,7 +43,11 @@ The shell verifies the complete resource inventory and SHA256 digests before
 launching the backend. The backend binds to an available loopback port and emits
 a bounded readiness message. A per-launch HttpOnly cookie and Host/Origin checks
 protect the local API. The launch capability is removed from page history.
-There are no frontend filesystem or shell permissions.
+There are no general frontend filesystem or shell permissions. Four export-only
+commands are authorized for the exact session origin. They accept opaque export
+IDs, not arbitrary filesystem paths. Exports use an OS-selected destination and
+a private sibling staging file; the final file is replaced only after a successful
+download. Failed or cancelled downloads leave an existing destination unchanged.
 
 The native process owns the backend lifetime. Windows uses a Job Object assigned
 before the backend executes; the Python worker layer also owns its children.
@@ -138,6 +144,11 @@ The Windows workflow builds and tests a candidate artifact without publishing a
 release. Keep failed logs and corrections. A release must be built from the
 reviewed commit, tested after packaging, and accompanied by hashes and a clear
 platform acceptance record.
+
+Native export acceptance must include the OS Save As dialog, cancellation,
+Unicode filenames, CSV and ZIP contents, existing-file replacement, the displayed
+path and Finder/File Explorer reveal. Browser download tests alone do not cover
+this desktop flow.
 
 Public macOS distribution additionally needs Developer ID signing and Apple
 notarization. Public Windows distribution needs an appropriate code-signing

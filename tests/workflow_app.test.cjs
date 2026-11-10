@@ -30,7 +30,8 @@ function ui(locale) {
       setAttribute(key, value) { attributes.set(key, value); }, getAttribute(key) { return attributes.get(key) ?? null; }, removeAttribute(key) { attributes.delete(key); },
       addEventListener(type, fn) { if (!handlers.has(type)) handlers.set(type, []); handlers.get(type).push(fn); },
       async fire(type, event = {}) { for (const fn of handlers.get(type) || []) await fn({target: this, ...event}); },
-      focus(options) { this.focusCalls.push(plain(options)); document.activeElement = this; },
+      focus(options) { this.focusCalls.push(options === undefined ? undefined : plain(options)); document.activeElement = this; },
+      select() { this.selected = true; },
       showModal() { if (this.open) throw new Error('already open'); this.open = true; this.showModalCalls = (this.showModalCalls || 0) + 1; },
       close() { this.open = false; },
       getBoundingClientRect() { return this.rect; },
@@ -55,6 +56,8 @@ function ui(locale) {
   element('model-tools').appendChild(replacementHint);
   const window = {location: {search: ''}, crypto,
     addEventListener(type, fn) { if (!windowListeners.has(type)) windowListeners.set(type, []); windowListeners.get(type).push(fn); },
+    removeEventListener(type, fn) { windowListeners.set(type, (windowListeners.get(type) || []).filter(item => item !== fn)); },
+    dispatchEvent(event) { for (const fn of [...(windowListeners.get(event.type) || [])]) fn(event); },
     confirm: () => { throw new Error('native confirm is not available in this WebView'); },
     WECFU_I18N: {t: key => key, getLang: () => 'en'},
     WECFU_PARAM_CONTROLS: require('../wecfu/server/static/param_controls.js'),
@@ -1723,4 +1726,197 @@ test('custom batch binds fresh source bytes and never draws result on a stale di
   assert.equal(v.run('state.history.length'),0);
   assert.equal(v.run('saves.length'),0);
   assert.deepEqual(plain(v.run('state.workflow.lastBatchReport.completed')),['first.png']);
+});
+
+// Desktop export acceptance uses only a synthetic response and mocked native
+// boundary; actual filesystem/native-dialog acceptance is performed on the app.
+function exportFixture({native = true, locale = 'en', prepare = {id: 'export-1', path: '/Users/test/成果 & <1>.csv'}, failAt} = {}) {
+  const view = ui(locale), commands = [], downloads = [], timers = new Map();
+  let nextTimer = 0;
+  view.context.setTimeout = (fn, ms) => { const id = ++nextTimer; timers.set(id, {fn, ms}); return id; };
+  view.context.clearTimeout = id => timers.delete(id);
+  view.context.Blob = Blob;
+  view.context.URL = {createObjectURL: () => 'blob:http://127.0.0.1:1234/export-1', revokeObjectURL() {}};
+  const originalElement = view.document.createElement;
+  view.document.createElement = tag => {
+    const element = originalElement(tag);
+    element.click = () => downloads.push({href: element.href, download: element.download});
+    element.remove = () => {};
+    return element;
+  };
+  view.document.body = view.node('body', 'BODY');
+  view.window.__WECFU_DESKTOP_EXPORT__ = native;
+  view.window.__WECFU_DESKTOP_PLATFORM__ = 'macos';
+  view.window.__TAURI__ = {core: {invoke: async (command, args) => {
+    commands.push({command, args: plain(args)});
+    if (failAt === command) throw new Error('synthetic native failure');
+    if (command === 'desktop_export_prepare') return prepare;
+  }}};
+  view.context.exportFetchFailure = failAt === 'fetch';
+  view.context.syntheticBlob = new Blob(['name,count\nsynthetic,2\n']);
+  view.run(`request = async url => {
+    calls.push({url});
+    if (exportFetchFailure) throw new Error('synthetic export failure');
+    return {headers: {get: () => null}, blob: async () => syntheticBlob};
+  }; openExportModal('csv');`);
+  const complete = detail => view.window.dispatchEvent({type: 'wecfu:desktop-export', detail});
+  return {...view, commands, downloads, timers, complete};
+}
+async function exportDownloaded(view) {
+  for (let turn = 0; turn < 30 && !view.downloads.length; turn++) await Promise.resolve();
+  assert.equal(view.downloads.length, 1);
+}
+
+test('desktop Save As cancellation makes no export request or download and resets controls', async () => {
+  const v = exportFixture({prepare: null});
+  assert.equal(v.element('export-browser-location').hidden, true);
+  assert.equal(v.element('export-desktop-location').hidden, false);
+  await v.run('doExport()');
+  assert.deepEqual(plain(v.run('calls')), []);
+  assert.equal(v.downloads.length, 0);
+  assert.equal(v.commands.length, 1);
+  assert.equal(v.commands[0].command, 'desktop_export_prepare');
+  assert.equal(v.element('status').textContent, 'Export cancelled');
+  assert.equal(v.element('export-backdrop').hidden, false);
+  assert.equal(v.element('btn-export-confirm').disabled, false);
+  assert.equal(v.run('state.busy'), false);
+});
+
+for (const failAt of ['desktop_export_prepare', 'fetch', 'desktop_export_arm']) {
+  test(`desktop ${failAt} failure cannot report a saved file`, async () => {
+    const v = exportFixture({failAt});
+    await assert.rejects(v.run('doExport()'));
+    assert.equal(v.element('export-receipt').hidden, true);
+    assert.equal(v.element('export-backdrop').hidden, false);
+    assert.equal(v.run('desktopExportReceipt'), null);
+    assert.equal(v.run('state.busy'), false);
+    assert.equal(v.downloads.length, 0);
+    assert.notEqual(v.element('status').textContent, 'Export saved');
+    assert.equal(v.commands.some(c => c.command === 'desktop_export_cancel'), failAt !== 'desktop_export_prepare');
+  });
+}
+
+for (const locale of ['en', 'zh-CN', 'fr', 'ru']) {
+  test(`desktop ${locale} shows exact saved path and reveal only after native completion`, async () => {
+    const v = exportFixture({locale});
+    const path = '/Users/test/成果 & <1>.csv';
+    const pending = v.run('doExport()');
+    await exportDownloaded(v);
+    assert.equal(v.element('export-receipt').hidden, true);
+    assert.equal(v.run('state.busy'), true);
+    v.complete({id: 'unrelated', status: 'saved', path});
+    await Promise.resolve();
+    assert.equal(v.run('desktopExportReceipt'), null);
+    v.complete({id: 'export-1', status: 'saved', path});
+    await pending;
+    assert.equal(v.element('export-backdrop').hidden, false, 'keep a discoverable receipt');
+    assert.equal(v.element('export-form-fields').hidden, true);
+    assert.equal(v.element('export-receipt').hidden, false);
+    assert.equal(v.element('export-saved-path').textContent, path);
+    assert.equal(v.element('btn-export-confirm').hidden, true);
+    assert.equal(v.element('btn-export-cancel').disabled, false);
+    assert.equal(v.run('state.busy'), false);
+    const translations = v.window.WECFU_I18N;
+    assert.equal(v.element('status').textContent, translations.t('exportSaved'));
+    assert.equal(v.element('btn-export-reveal').textContent, translations.t('exportRevealFinder'));
+    await v.run('revealDesktopExport()');
+    assert.deepEqual(v.commands.at(-1), {command: 'desktop_export_reveal', args: {id: 'export-1'}});
+    assert.equal(v.commands.some(c => c.command === 'desktop_export_cancel'), false);
+    assert.equal([...v.timers.values()].some(timer => timer.ms === 15 * 60 * 1000), false, 'completion timeout must be removed');
+    v.run("openExportModal('zip')");
+    assert.equal(v.element('export-receipt').hidden, true);
+    assert.equal(v.element('export-form-fields').hidden, false);
+    assert.equal(v.element('btn-export-confirm').hidden, false);
+    assert.equal(v.run('desktopExportReceipt'), null);
+  });
+}
+
+for (const outcome of ['error', 'different-path', 'timeout']) {
+  test(`desktop ${outcome} completion remains unsaved and allows retry`, async () => {
+    const v = exportFixture(), pending = v.run('doExport()');
+    await exportDownloaded(v);
+    if (outcome === 'timeout') [...v.timers.values()].find(timer => timer.ms === 15 * 60 * 1000).fn();
+    else v.complete({id: 'export-1', status: outcome === 'error' ? 'error' : 'saved', path: '/wrong/path.csv'});
+    await assert.rejects(pending, outcome === 'timeout' ? /not confirmed/ : /could not be saved/);
+    assert.equal(v.run('desktopExportReceipt'), null);
+    assert.equal(v.element('export-receipt').hidden, true);
+    assert.equal(v.element('btn-export-confirm').disabled, false);
+    assert.equal(v.commands.at(-1).command, 'desktop_export_cancel');
+  });
+}
+
+test('desktop bridge unavailability never silently falls back to browser downloads', async () => {
+  const v = exportFixture();
+  delete v.window.__TAURI__;
+  await assert.rejects(v.run('doExport()'), /Saving is unavailable/);
+  assert.equal(v.downloads.length, 0);
+  assert.deepEqual(plain(v.run('calls')), []);
+  assert.equal(v.run('state.busy'), false);
+});
+
+test('browser retains download flow and does not claim the download has been saved', async () => {
+  const v = exportFixture({native: false});
+  assert.equal(v.element('export-browser-location').hidden, false);
+  assert.equal(v.element('export-desktop-location').hidden, true);
+  await v.run('doExport()');
+  assert.equal(v.commands.length, 0);
+  assert.equal(v.downloads.length, 1);
+  assert.equal(v.element('status').textContent, 'Download started — check your browser downloads');
+  assert.equal(v.element('export-backdrop').hidden, true);
+  assert.equal(v.run('desktopExportReceipt'), null);
+});
+
+test('desktop native save ignores any stale browser folder handle', async () => {
+  const v = exportFixture();
+  v.window.showDirectoryPicker = () => { throw new Error('browser folder picker must not be used'); };
+  v.context.forbiddenFolder = {getFileHandle() { throw new Error('stale browser folder must not receive the export'); }};
+  v.run('state.saveDirHandle = forbiddenFolder');
+  const pending = v.run('doExport()');
+  await exportDownloaded(v);
+  v.complete({id: 'export-1', status: 'saved', path: '/Users/test/成果 & <1>.csv'});
+  await pending;
+  assert.equal(v.element('status').textContent, 'Export saved');
+});
+
+test('browser chosen-folder flow closes the writable before reporting saved', async () => {
+  const v = exportFixture({native: false}), writes = [];
+  let closed = false;
+  v.window.showDirectoryPicker = () => {};
+  v.context.browserFolder = {async getFileHandle(name, options) {
+    assert.equal(name, 'first.csv'); assert.equal(options.create, true);
+    return {async createWritable() { return {
+      async write(blob) { writes.push(await blob.text()); },
+      async close() { closed = true; }, async abort() { throw new Error('successful write should not be aborted'); },
+    }; }};
+  }};
+  v.run('state.saveDirHandle = browserFolder');
+  await v.run('doExport()');
+  assert.equal(closed, true);
+  assert.deepEqual(writes, ['name,count\nsynthetic,2\n']);
+  assert.equal(v.downloads.length, 0);
+  assert.equal(v.commands.length, 0);
+  assert.equal(v.element('status').textContent, 'Export saved');
+});
+
+test('reveal failure retains the successful path for manual finding', async () => {
+  const v = exportFixture({failAt: 'desktop_export_reveal'}), pending = v.run('doExport()');
+  await exportDownloaded(v);
+  const path = '/Users/test/成果 & <1>.csv';
+  v.complete({id: 'export-1', status: 'saved', path});
+  await pending;
+  await assert.rejects(v.run('revealDesktopExport()'), /folder could not be opened/);
+  assert.equal(v.element('export-saved-path').textContent, path);
+  assert.equal(v.element('export-receipt').hidden, false);
+  assert.equal(v.element('btn-export-reveal').disabled, false);
+  assert.deepEqual(plain(v.run('desktopExportReceipt')), {id: 'export-1', path});
+});
+
+test('native rejection codes become localized actionable messages, without an export request', async () => {
+  for (const [code, key] of [['invalid_destination', 'exportSaveFailed'], ['invalid_export_name', 'exportFileNameInvalid']]) {
+    const v = exportFixture({locale: 'zh-CN'});
+    v.window.__TAURI__.core.invoke = async () => { throw code; };
+    await assert.rejects(v.run('doExport()'), error => error.message === v.window.WECFU_I18N.t(key));
+    assert.deepEqual(plain(v.run('calls')), []);
+    assert.equal(v.run('state.busy'), false);
+  }
 });

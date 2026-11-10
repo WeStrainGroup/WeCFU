@@ -243,10 +243,11 @@
   <div id="export-backdrop" hidden>
     <div id="export-modal" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h2 data-i18n="exportTitle">Export</h2>
+        <h2 id="export-title" data-i18n="exportTitle">Export</h2>
         <button id="btn-export-cancel" data-i18n="exportCancel">Cancel</button>
       </div>
       <div class="modal-body">
+        <div id="export-form-fields">
         <label class="stacked"><span data-i18n="exportFileName">File name</span>
           <input id="export-filename" />
         </label>
@@ -255,9 +256,16 @@
           <label><input type="radio" name="export-format" value="csv" checked/> <span data-i18n="exportFormatCSV">CSV only (counts)</span></label>
           <label><input type="radio" name="export-format" value="zip"/> <span data-i18n="exportFormatZip">Bundle (CSV plus annotated images and JSON)</span></label>
         </div>
-        <label class="stacked"><span data-i18n="exportSaveLocation">Save to</span>
+        <label id="export-browser-location" class="stacked"><span data-i18n="exportSaveLocation">Save to</span>
           <button id="export-location-btn" type="button" data-i18n="exportSaveLocationDefault">Downloads (browser default)</button>
         </label>
+        <p id="export-desktop-location" class="muted" data-i18n="exportDesktopLocation" hidden>Choose the save location in the next window.</p>
+        </div>
+        <div id="export-receipt" role="status" hidden>
+          <p data-i18n="exportSavedTo">Saved to</p>
+          <output id="export-saved-path"></output>
+          <button id="btn-export-reveal" type="button" data-i18n="exportReveal">Show in folder</button>
+        </div>
         <div class="modal-actions">
           <button id="btn-export-confirm" class="primary" data-i18n="exportConfirm">Save</button>
         </div>

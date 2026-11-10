@@ -1,12 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod exports;
 mod manifest;
 mod process;
 mod protocol;
 
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::VecDeque,
     io::{BufRead, BufReader, Read, Write},
     path::PathBuf,
     sync::{
@@ -30,7 +31,7 @@ struct BootStatus {
 struct Shared {
     status: Mutex<BootStatus>,
     origin: Mutex<Option<String>>,
-    downloads: Mutex<BTreeMap<String, PathBuf>>,
+    exports: Mutex<exports::Book>,
     shutdown: AtomicBool,
     host_done: AtomicBool,
 }
@@ -45,7 +46,7 @@ impl Shared {
                 detail: String::new(),
             }),
             origin: Mutex::new(None),
-            downloads: Mutex::new(BTreeMap::new()),
+            exports: Mutex::new(exports::Book::default()),
             shutdown: AtomicBool::new(false),
             host_done: AtomicBool::new(false),
         }
@@ -94,6 +95,7 @@ fn external(url: &url::Url) {
 
 fn request_shutdown(app: &tauri::AppHandle, shared: &Arc<Shared>) {
     shared.shutdown.store(true, Ordering::SeqCst);
+    shared.exports.lock().unwrap().cleanup();
     shared.status(
         "stopping",
         "Closing WeCFU",
@@ -212,7 +214,19 @@ fn run_host(
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(event) if !ready => {
                 let url = protocol::ready_url(event?, session, &resources.version)?;
-                *shared.origin.lock().unwrap() = Some(url.origin().ascii_serialization());
+                let origin = url.origin().ascii_serialization();
+                app.add_capability(
+                    tauri::ipc::CapabilityBuilder::new("native-export")
+                        .local(false)
+                        .window("main")
+                        .remote(format!("{origin}/*"))
+                        .permission("allow-desktop-export-prepare")
+                        .permission("allow-desktop-export-arm")
+                        .permission("allow-desktop-export-cancel")
+                        .permission("allow-desktop-export-reveal"),
+                )
+                .map_err(|_| "Cannot authorize native export controls.".to_string())?;
+                *shared.origin.lock().unwrap() = Some(origin);
                 let window = app
                     .get_webview_window("main")
                     .ok_or("The application window was closed.")?;
@@ -316,22 +330,18 @@ mod lifecycle_tests {
     }
 }
 
-fn download_notice(webview: &tauri::Webview, text: &str) {
-    let encoded = serde_json::to_string(text).unwrap();
-    let js = format!(
-        r#"(() => {{ const n=document.createElement('div'); n.setAttribute('role','status');
-        n.textContent={encoded}; n.style.cssText='position:fixed;bottom:24px;right:24px;z-index:99999;padding:14px 20px;border:1px solid #ddd;border-radius:12px;background:#fff;color:#333;font:14px -apple-system,BlinkMacSystemFont,sans-serif;box-shadow:0 6px 24px #0001;max-width:420px';
-        document.body.append(n); setTimeout(()=>n.remove(),8000); }})()"#
-    );
-    let _ = webview.eval(&js);
-}
-
 fn main() {
     let shared = Arc::new(Shared::new());
     let setup_state = shared.clone();
     let app = tauri::Builder::default()
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![boot_status])
+        .invoke_handler(tauri::generate_handler![
+            boot_status,
+            exports::desktop_export_prepare,
+            exports::desktop_export_arm,
+            exports::desktop_export_cancel,
+            exports::desktop_export_reveal
+        ])
         .setup(move |app| {
             let navigation = setup_state.clone();
             let downloads = setup_state.clone();
@@ -341,6 +351,17 @@ fn main() {
                     .inner_size(1320.0, 880.0)
                     .min_inner_size(960.0, 640.0)
                     .incognito(true)
+                    .initialization_script(format!(
+                "window.__WECFU_DESKTOP_EXPORT__=true;window.__WECFU_DESKTOP_PLATFORM__={};",
+                serde_json::to_string(if cfg!(target_os = "macos") {
+                    "macos"
+                } else if cfg!(windows) {
+                    "windows"
+                } else {
+                    "linux"
+                })
+                .unwrap()
+            ))
                     .disable_drag_drop_handler()
                     .on_navigation(move |url| {
                         if owned_asset(url)
@@ -359,61 +380,29 @@ fn main() {
                     .on_download(move |webview, event| {
                         match event {
                             DownloadEvent::Requested { url, destination } => {
-                                if !protocol::downloadable(&url, &downloads.origin.lock().unwrap())
-                                {
+                                let origin = downloads.origin.lock().unwrap().clone();
+                                let owned = webview
+                                    .url()
+                                    .is_ok_and(|current| protocol::same_origin(&current, &origin));
+                                if !owned || downloads.shutdown.load(Ordering::SeqCst) {
                                     return false;
                                 }
-                                let Ok(folder) = webview.app_handle().path().download_dir() else {
-                                    download_notice(
-                                        &webview,
-                                        "The Downloads folder is unavailable.",
-                                    );
+                                let Some(target) =
+                                    downloads.exports.lock().unwrap().requested(&url, &origin)
+                                else {
                                     return false;
                                 };
-                                if std::fs::create_dir_all(&folder).is_err() {
-                                    download_notice(&webview, "Cannot write to Downloads.");
-                                    return false;
-                                }
-                                let filename = destination
-                                    .file_name()
-                                    .unwrap_or(std::ffi::OsStr::new("WeCFU-export"))
-                                    .to_owned();
-                                let mut target = folder.join(filename);
-                                if target.exists() {
-                                    let stem =
-                                        target.file_stem().unwrap_or_default().to_string_lossy();
-                                    let extension = target
-                                        .extension()
-                                        .map(|e| format!(".{}", e.to_string_lossy()))
-                                        .unwrap_or_default();
-                                    target = folder.join(format!(
-                                        "{stem}-{}{extension}",
-                                        uuid::Uuid::new_v4().simple()
-                                    ));
-                                }
-                                downloads
-                                    .downloads
-                                    .lock()
-                                    .unwrap()
-                                    .insert(url.to_string(), target.clone());
                                 *destination = target;
                             }
                             DownloadEvent::Finished { url, path, success } => {
-                                // WKWebView omits the destination from its completion event.
-                                let requested =
-                                    downloads.downloads.lock().unwrap().remove(url.as_str());
-                                let path = path.or(requested);
-                                let name = path
-                                    .as_ref()
-                                    .and_then(|p| p.file_name())
-                                    .map(|n| n.to_string_lossy())
-                                    .unwrap_or_default();
-                                let text = if success {
-                                    format!("Saved to Downloads: {name}")
-                                } else {
-                                    "Export could not be saved. Please retry.".into()
-                                };
-                                download_notice(&webview, &text);
+                                let result = downloads.exports.lock().unwrap().finished(
+                                    &url,
+                                    path.as_deref(),
+                                    success,
+                                );
+                                if let Some(event) = result {
+                                    exports::notify(&webview, &event);
+                                }
                             }
                             _ => (),
                         }
@@ -440,7 +429,8 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Unable to construct the WeCFU desktop window");
-    app.run(move |handle, event| {
+    let after_exit = shared.clone();
+    let code = app.run_return(move |handle, event| {
         if let RunEvent::ExitRequested { api, .. } = event {
             if !shared.host_done.load(Ordering::SeqCst) {
                 api.prevent_exit();
@@ -448,4 +438,20 @@ fn main() {
             }
         }
     });
+    // run_return consumes the runtime. Retry only our exact staging paths after
+    // the event loop returns; a failed cleanup must not turn into a successful save.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let clean = loop {
+        if after_exit.exports.lock().unwrap().cleanup() {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    if !clean {
+        eprintln!("An incomplete export could not be removed.");
+    }
+    std::process::exit(if clean { code } else { 1 });
 }

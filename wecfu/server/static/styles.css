@@ -244,6 +244,7 @@ body:has(#viewer.review-mode) #export-menu { display: none; }
 .modal-body input:not([type=radio]) { width: 100%; }
 #export-format-row { display: flex; flex-direction: column; gap: 7px; margin-bottom: 15px; }
 #export-location-btn { text-align: left; width: 100%; }
+#export-saved-path { display: block; margin: 8px 0 18px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: #fafafa; overflow-wrap: anywhere; user-select: text; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 6px; }
 .help-footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); }
 .help-footer a { color: #797979; text-decoration: none; }.help-footer a:hover { text-decoration: underline; }

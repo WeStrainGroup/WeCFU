@@ -17,7 +17,7 @@
           "windows": [
             "main"
           ],
-          "permissions": [],
+          "permissions": ["allow-boot-status"],
           "local": true
         }
       ]
