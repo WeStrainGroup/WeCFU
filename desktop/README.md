@@ -129,6 +129,18 @@ Windows candidates use NSIS zlib compression to keep rebuilds practical. This
 changes installer compression only; the installed resource inventory and file
 hashes must still match the complete bundle.
 
+The Windows installation gate also starts the exact installed desktop executable,
+checks its bundled host identity, empty workspace and Ultra availability, then
+retires the test-owned process tree. This bounded process/API check performs no
+inference and does not establish WebView rendering, interactive Save As, Explorer
+selection or graceful window-close acceptance. Those still require an actual
+Windows desktop session.
+
+Windows export completion accepts WebView2's safe path normalization while still
+requiring the exact owned staging file. Paths that need extended Windows syntax
+retain that syntax in the save receipt. Explorer reveal explicitly fails for
+these paths, including verbatim UNC paths, rather than opening a different file.
+
 ## Acceptance and release
 
 `tools/desktop_acceptance.py` performs bounded, actual bundled inference on two

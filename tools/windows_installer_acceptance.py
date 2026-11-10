@@ -1,4 +1,4 @@
-"""Bounded Windows NSIS installation + installed-backend synthetic acceptance.
+"""Bounded Windows NSIS installation, installed backend and native-shell smoke.
 
 Only run on a disposable, clean Windows runner. Existing WeCFU registration,
 installation paths or shortcuts cause refusal. No elevation, uninstall, model
@@ -303,13 +303,15 @@ def main():
     started = time.monotonic(); deadline = started + TOTAL_SECONDS
     receipt = {'status': 'failed', 'explicit_synthetic': True, 'native_windows_execution': sys.platform == 'win32',
                'total_budget_seconds': TOTAL_SECONDS, 'model_retry': False, 'automatic_uninstall': False,
-               'limitations': ['CLI silent installation and installed backend; native WebView interaction/manual clean Windows11 acceptance remains separate',
+               'limitations': ['CLI silent installation, installed backend and installed EXE process/API startup smoke; no rendered WebView, native Save As/Explorer, normal window-close or manual clean Windows11 GUI acceptance',
+                              'Installed shell smoke forcibly retires its test-owned Job and retains its disposable session files; this does not establish graceful shell cleanup.',
                               'Installer may register this new per-user app/shortcuts; test only on a disposable runner. The installation is retained.'],
                'nsis_command_contract': NSIS_DOC}
     try:
         require(sys.platform == 'win32', 'Installer acceptance is Windows-only; no install was attempted')
         import winreg
         sys.path.insert(0, str(REPO))
+        from tools.windows_shell_smoke import run as run_shell_smoke
         installer, built, source = args.installer.resolve(), args.built_exe.resolve(), args.source_bundle.resolve()
         require(installer.is_file() and built.is_file() and not is_link(args.installer) and not is_link(args.built_exe)
                 and installer.suffix.lower() == built.suffix.lower() == '.exe', 'Missing/linked build artifacts')
@@ -320,7 +322,8 @@ def main():
         receipt['source_payload'] = verify_payload(source, raw_manifest, deadline)
         save(out / 'source-manifest.json', json.loads(raw_manifest))
         bundler_files = check_bundler_version(REPO)
-        receipt['inputs'] = {str(p): digest(p, deadline) for p in (installer, built, Path(__file__), REPO/'tools/desktop_acceptance.py', *bundler_files)}
+        receipt['inputs'] = {str(p): digest(p, deadline) for p in (installer, built, Path(__file__), REPO/'tools/desktop_acceptance.py',
+                                                               REPO/'tools/windows_shell_smoke.py', *bundler_files)}
         receipt['shell_derivation'] = nsis_shell_identity(built, deadline)
         require(receipt['shell_derivation']['original_sha256'] == receipt['inputs'][str(built)],
                 'Build executable changed before installation')
@@ -360,6 +363,8 @@ def main():
                     'Installed API evidence changed')
         receipt['installed_api_receipt'] = {'path':str(api_output/'result.json'), 'sha256':digest(api_output/'result.json', deadline),
                                            'actual_runtime':result['actual_runtime'],'model_requests':2}
+        receipt['installed_shell_receipt'] = run_shell_smoke(installed_exe, installed_bundle, manifest,
+            out / 'installed-shell', receipt['shell_derivation']['expected_installed_sha256'], deadline)
         require(digest(installer, deadline) == receipt['inputs'][str(installer)]
                 and digest(built, deadline) == receipt['inputs'][str(built)]
                 and digest(installed_exe, deadline) == receipt['shell_derivation']['expected_installed_sha256']

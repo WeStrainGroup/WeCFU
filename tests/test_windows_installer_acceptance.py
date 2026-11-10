@@ -255,6 +255,12 @@ def test_complete_installed_receipt_handles_utf8_under_windows_legacy_locale(tmp
             if mutation == 'evidence': evidence.write_bytes(b'changed after receipt')
         return {'exit_code': 0, 'seconds': 0, 'timeout_seconds': cap}
     monkeypatch.setattr(accept, 'run_owned', simulated_process)
+    from tools import windows_shell_smoke
+    def simulated_shell(executable, bundle, manifest, folder, expected, deadline):
+        assert executable == destination/built.name and bundle == destination/'bundle'
+        assert expected == hashlib.sha256(executable.read_bytes()).hexdigest()
+        return {'mode': 'installed_shell_boot_and_forced_owned_cleanup', 'model_requests': 0}
+    monkeypatch.setattr(windows_shell_smoke, 'run', simulated_shell)
 
     assert accept.main() == (0 if mutation == 'none' else 1)
     receipt = json.loads((output/'result.json').read_text(encoding='utf-8'))
@@ -262,6 +268,7 @@ def test_complete_installed_receipt_handles_utf8_under_windows_legacy_locale(tmp
     assert receipt['installed_exe']['sha256'] == receipt['installed_exe']['expected_sha256']
     if mutation == 'none':
         assert receipt['status'] == 'passed'
+        assert receipt['installed_shell_receipt']['model_requests'] == 0
         assert '验证' in receipt['installed_api_receipt']['actual_runtime']['executable']
     else:
         assert receipt['status'] == 'failed'

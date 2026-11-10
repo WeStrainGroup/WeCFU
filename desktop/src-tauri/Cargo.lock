@@ -3879,6 +3879,7 @@ dependencies = [
 name = "wecfu-desktop"
 version = "1.3.0-rc.1"
 dependencies = [
+ "dunce",
  "libc",
  "open",
  "rfd",

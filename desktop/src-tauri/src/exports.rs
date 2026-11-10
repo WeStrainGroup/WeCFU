@@ -58,6 +58,7 @@ fn existing(path: &Path) -> Result<Option<Existing>, String> {
 struct Pending {
     id: String,
     target: PathBuf,
+    display_path: String,
     original: Option<Existing>,
     stage_dir: Option<PathBuf>,
     stage: Option<PathBuf>,
@@ -130,11 +131,13 @@ impl Book {
             .map_err(|_| "invalid_destination")?;
         let filename = path.file_name().ok_or("invalid_destination")?;
         let target = parent.join(filename);
+        let display_path = presentation_path(&target)?.to_string_lossy().into_owned();
         let original = existing(&target)?;
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.pending = Some(Pending {
             id: id.clone(),
             target: target.clone(),
+            display_path: display_path.clone(),
             original,
             stage_dir: None,
             stage: None,
@@ -144,7 +147,7 @@ impl Book {
         });
         Ok(Some(Prepared {
             id,
-            path: target.to_string_lossy().into_owned(),
+            path: display_path,
         }))
     }
 
@@ -239,7 +242,10 @@ impl Book {
         };
         let outcome = (|| -> Result<(), String> {
             let stage = pending.stage.as_ref().ok_or("missing_stage")?;
-            if !success || !pending.started || pending.cancelled || path.is_some_and(|p| p != stage)
+            if !success
+                || !pending.started
+                || pending.cancelled
+                || path.is_some_and(|p| !completion_path_matches(p, stage))
             {
                 return Err("export_failed".into());
             }
@@ -268,6 +274,7 @@ impl Book {
                 Pending {
                     id: pending.id.clone(),
                     target: pending.target.clone(),
+                    display_path: pending.display_path.clone(),
                     original: pending.original.clone(),
                     stage_dir: pending.stage_dir.clone(),
                     stage: pending.stage.clone(),
@@ -290,7 +297,7 @@ impl Book {
                 Some(ExportEvent {
                     id: pending.id,
                     status: "saved",
-                    path: Some(pending.target.to_string_lossy().into_owned()),
+                    path: Some(pending.display_path),
                     message: None,
                 })
             }
@@ -325,6 +332,63 @@ impl Book {
         self.cancelled.retain(|_, pending| !pending.cleanup());
         self.choosing = false;
         self.cancelled.is_empty()
+    }
+}
+
+#[cfg(not(windows))]
+fn presentation_path(path: &Path) -> Result<PathBuf, String> {
+    Ok(path.to_owned())
+}
+
+#[cfg(windows)]
+fn presentation_path(path: &Path) -> Result<PathBuf, String> {
+    use std::path::Prefix;
+    if !path.is_absolute() {
+        return Err("invalid_destination".into());
+    }
+    let mut components = path.components();
+    let Some(std::path::Component::Prefix(prefix)) = components.next() else {
+        return Err("invalid_destination".into());
+    };
+    match prefix.kind() {
+        // Match Wry's conservative simplification. Long paths, reserved names,
+        // trailing dots/spaces and verbatim UNC retain their exact spelling.
+        Prefix::VerbatimDisk(_) => Ok(dunce::simplified(path).to_owned()),
+        Prefix::VerbatimUNC(_, _) | Prefix::Disk(_) | Prefix::UNC(_, _) => Ok(path.to_owned()),
+        // Device and volume namespaces are not safe Explorer display names.
+        _ => Err("invalid_destination".into()),
+    }
+}
+
+#[cfg(windows)]
+fn shell_path(path: &Path) -> Result<PathBuf, String> {
+    use std::path::{Component, Prefix};
+    let path = presentation_path(path)?;
+    match path.components().next() {
+        Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::UNC(_, _)) =>
+        {
+            Ok(path)
+        }
+        // Explorer must never reinterpret a path that needs verbatim semantics.
+        _ => Err("cannot_reveal_export".into()),
+    }
+}
+
+fn completion_path_matches(actual: &Path, expected: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        // Wry simplifies verbatim paths before passing them to WebView2, so the
+        // completion callback can spell our owned stage differently. Resolve both
+        // existing files; never accept a different destination or a missing file.
+        matches!(
+            (actual.canonicalize(), expected.canonicalize()),
+            (Ok(actual), Ok(expected)) if actual == expected
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        actual == expected
     }
 }
 
@@ -490,6 +554,7 @@ fn reveal_windows(path: &Path) -> Result<(), String> {
         System::Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_APARTMENTTHREADED},
         UI::Shell::{SHOpenFolderAndSelectItems, SHParseDisplayName},
     };
+    let path = shell_path(path).map_err(|_| "cannot_reveal_export".to_string())?;
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     // This command is synchronous; balance COM initialization only when it succeeds.
     unsafe {
@@ -643,7 +708,11 @@ mod tests {
         let result = book.finished(&blob(), Some(&stage), true).unwrap();
         assert_eq!(result.status, "saved");
         assert_eq!(fs::read(&path).unwrap(), b"new-csv");
-        assert_eq!(book.reveal_path(&p.id).unwrap(), path);
+        assert_eq!(
+            book.reveal_path(&p.id).unwrap(),
+            path.canonicalize().unwrap()
+        );
+        assert_eq!(result.path.as_deref(), Some(p.path.as_str()));
         book.cancel(&p.id).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"new-csv");
     }
@@ -709,5 +778,105 @@ mod tests {
             "saved"
         );
         assert_eq!(fs::read(temp.0.join("next.CSV")).unwrap(), b"next-download");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_display_and_shell_paths_preserve_unicode_drive_and_unc_names() {
+        for (internal, displayed) in [
+            (r"\\?\C:\研究 数据\结果.csv", r"C:\研究 数据\结果.csv"),
+            (
+                r"\\?\UNC\server\shared data\Результат.zip",
+                r"\\?\UNC\server\shared data\Результат.zip",
+            ),
+            (r"C:\研究 数据\结果.csv", r"C:\研究 数据\结果.csv"),
+            (
+                r"\\server\shared data\Результат.zip",
+                r"\\server\shared data\Результат.zip",
+            ),
+        ] {
+            assert_eq!(
+                presentation_path(Path::new(internal)).unwrap(),
+                Path::new(displayed)
+            );
+        }
+        for unsupported in [
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\result.csv",
+            r"\\?\Volume{12345678-1234-1234-1234-123456789012}\result.csv",
+            r"\\.\C:\result.csv",
+            r"C:result.csv",
+            r"result.csv",
+        ] {
+            assert!(presentation_path(Path::new(unsupported)).is_err());
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_extended_path_semantics_are_preserved_and_not_sent_to_explorer() {
+        let long_path = format!(r"\\?\C:\{}\{}\result.csv", "a".repeat(150), "b".repeat(150));
+        for original in [
+            r"\\?\C:\results.\out.csv",
+            r"\\?\C:\results \out.csv",
+            r"\\?\C:\CON\out.csv",
+            r"\\?\C:\AUX.txt\out.csv",
+            r"\\?\C:\COM1\out.csv",
+            r"\\?\UNC\server\share\out.csv",
+            r"\\?\UNC\server\share\results.\out.csv",
+            long_path.as_str(),
+        ] {
+            assert_eq!(
+                presentation_path(Path::new(original)).unwrap(),
+                Path::new(original)
+            );
+            assert!(shell_path(Path::new(original)).is_err());
+        }
+        assert_eq!(
+            shell_path(Path::new(r"\\?\C:\研究 数据\结果.csv")).unwrap(),
+            Path::new(r"C:\研究 数据\结果.csv")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_webview_normalized_completion_promotes_owned_stage() {
+        let temp = Temp::new();
+        let path = temp.0.join("结果.csv");
+        fs::write(&path, b"old").unwrap();
+        let mut book = Book::default();
+        let prepared = prepare(&mut book, path.clone());
+        assert!(!prepared.path.starts_with(r"\\?\"));
+        book.arm(&prepared.id, &blob(), &origin()).unwrap();
+        let stage = book.requested(&blob(), &origin()).unwrap();
+        assert!(stage.as_os_str().to_string_lossy().starts_with(r"\\?\"));
+        fs::write(&stage, b"new-csv").unwrap();
+        let callback_path = presentation_path(&stage).unwrap();
+        assert_ne!(callback_path, stage);
+        let event = book.finished(&blob(), Some(&callback_path), true).unwrap();
+        assert_eq!(event.status, "saved");
+        assert_eq!(event.path.as_deref(), Some(prepared.path.as_str()));
+        assert_eq!(fs::read(&path).unwrap(), b"new-csv");
+        assert_eq!(
+            book.reveal_path(&prepared.id).unwrap(),
+            path.canonicalize().unwrap()
+        );
+        assert!(!stage.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_completion_rejects_other_and_missing_files() {
+        let temp = Temp::new();
+        let owned = temp.0.join("owned.csv");
+        let other = temp.0.join("other.csv");
+        fs::write(&owned, b"same").unwrap();
+        fs::write(&other, b"same").unwrap();
+        let canonical = owned.canonicalize().unwrap();
+        assert!(completion_path_matches(&owned, &canonical));
+        assert!(!completion_path_matches(&other, &canonical));
+        assert!(!completion_path_matches(
+            &temp.0.join("missing.csv"),
+            &canonical
+        ));
     }
 }
