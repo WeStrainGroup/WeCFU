@@ -119,7 +119,14 @@ def command_line(command):
 
 
 def same_path(actual, expected):
-    return type(actual) is str and bool(actual) and Path(actual).resolve() == Path(expected).resolve()
+    if type(actual) is not str or not actual:
+        return False
+    try:
+        # Rust's canonical Windows paths use the extended prefix. Compare real
+        # filesystem identity, not spelling, without stripping device prefixes.
+        return Path(actual).samefile(Path(expected))
+    except (OSError, ValueError):
+        return False
 
 
 def validate_snapshot(data, *, shell_pid, owner_pid, installed, bundle, manifest, temp_root,
@@ -150,7 +157,7 @@ def validate_snapshot(data, *, shell_pid, owner_pid, installed, bundle, manifest
             and args[6] == '--session-id' and type(args[7]) is str and SESSION.fullmatch(args[7])
             and args[8] == '--workspace-root', 'Installed host command does not match the native contract')
     workspace = Path(args[9]).resolve()
-    require(workspace.parent == temp_root.resolve() and WORKSPACE.fullmatch(workspace.name),
+    require(same_path(str(workspace.parent), temp_root) and WORKSPACE.fullmatch(workspace.name),
             'Installed shell used a workspace outside this test')
     identity = {'shell_pid': shell_pid, 'shell_created_ms': shell['created_ms'],
                 'host_pid': host['pid'], 'host_created_ms': host['created_ms'],

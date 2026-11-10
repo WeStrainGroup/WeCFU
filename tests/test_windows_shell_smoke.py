@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 import time
 from types import SimpleNamespace
 
@@ -21,6 +22,9 @@ def fixture(tmp_path):
     bundle = installed.parent/'bundle'; bundle.mkdir()
     manifest = {'python': 'runtime/python.exe', 'entrypoint': 'app/desktop_entry.py', 'app_version': 'synthetic'}
     (bundle/'bundle-manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+    for name in (manifest['python'], manifest['entrypoint']):
+        target = bundle/name; target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'synthetic existing resource')
     temp = tmp_path/'test-temp'; temp.mkdir()
     workspace = temp/('wecfu-desktop-session-' + 'b'*32); workspace.mkdir()
     moment = int(time.time()*1000)
@@ -32,6 +36,41 @@ def fixture(tmp_path):
     kwargs = dict(shell_pid=20, owner_pid=10, installed=installed, bundle=bundle, manifest=manifest,
                   temp_root=temp, launched_ms=moment, parse=json.loads)
     return data, kwargs, args
+
+
+def test_path_identity_requires_existing_same_file_or_directory(tmp_path):
+    first = tmp_path/'first'; first.write_bytes(b'identical bytes')
+    second = tmp_path/'second'; second.write_bytes(b'identical bytes')
+    missing = tmp_path/'missing'
+    assert smoke.same_path(str(first), first)
+    assert smoke.same_path(str(tmp_path), tmp_path)
+    assert not smoke.same_path(str(first), second)
+    assert not smoke.same_path(str(missing), missing)
+    assert not smoke.same_path(str(first), missing)
+    assert not smoke.same_path(str(missing), first)
+    assert not smoke.same_path('', first)
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Requires real Windows extended-path filesystem identity')
+def test_windows_extended_and_ordinary_paths_identify_the_same_existing_runtime(tmp_path):
+    data, kwargs, args = fixture(tmp_path)
+    def extended(path):
+        normal = str(path)
+        assert not normal.startswith('\\\\?\\')
+        return '\\\\?\\' + normal
+    first = kwargs['bundle']/kwargs['manifest']['python']
+    other = kwargs['bundle']/kwargs['manifest']['entrypoint']
+    assert smoke.same_path(extended(first), first)
+    assert smoke.same_path(str(first), Path(extended(first)))
+    assert not smoke.same_path(extended(first), other)
+    assert not smoke.same_path(extended(first.parent/'missing.exe'), first)
+    data['shell']['executable'] = extended(kwargs['installed'])
+    data['children'][0]['executable'] = extended(first)
+    for index in (0, 3, 5, 9):
+        args[index] = extended(args[index])
+    data['children'][0]['command'] = json.dumps(args)
+    result = smoke.validate_snapshot(data, **kwargs)
+    assert result['session'] == TOKEN and result['identity']['runtime'] == str(first)
 
 
 def test_exact_owned_runtime_unicode_paths_and_capability_remain_separate(tmp_path):
