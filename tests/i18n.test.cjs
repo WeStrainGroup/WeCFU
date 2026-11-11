@@ -19,7 +19,7 @@ function loadI18n(storedLanguage) {
 const locales = ['en', 'zh-CN', 'fr', 'ru'];
 const helpActions = [
   'addImages', 'chooseFolder', 'ingestBtn', 'profileDefault', 'profileClassical', 'profileCustom',
-  'recognizeAll', 'recognizeCurrent', 'stopCounting', 'modelApply', 'modelDiscard',
+  'recognizeAll', 'recognizeCurrent', 'countMode', 'modeAuto', 'stopCounting', 'modelApply', 'modelDiscard',
   'livePreview', 'applyParams', 'openAdjustments',
   'manualMarkSettings', 'imageActions', 'adjustCrop', 'bulkDeleteMode',
   'selectAllImages', 'deleteSelectedImages', 'exportMenu', 'referenceTitle', 'referenceSave',
@@ -145,5 +145,21 @@ test('help separates batch policies, browsing, verification and desktop/browser 
   for (const locale of locales) {
     i18n.setLang(locale);
     for (const fact of facts[locale]) assert.match(i18n.t('helpBody'), fact, `${locale}: ${fact}`);
+  }
+});
+
+test('help requires leaving manual mode before recognizing a skipped photo', () => {
+  const { I18N } = loadI18n();
+  const instructions = {
+    en: /Pure manual<\/b> mode, first choose <b>More → Mode → Automatic \+ manual/,
+    'zh-CN': /纯手动模式的照片，先在<b>更多 → 计数模式<\/b>中切换到<b>自动识别＋手动校正/,
+    fr: /mode <b>Manuel<\/b>, choisissez d’abord <b>Plus → Mode → Automatique \+ correction manuelle/,
+    ru: /режим <b>Вручную<\/b>, сначала переключите его на <b>Автоматически \+ вручную/,
+  };
+  for (const locale of locales) {
+    assert.match(I18N[locale].helpBody, instructions[locale], locale);
+    for (const key of ['countMode', 'modeAuto', 'modeManual']) {
+      assert.equal(typeof I18N[locale][key], 'string', `${locale}: ${key} must be localized`);
+    }
   }
 });
