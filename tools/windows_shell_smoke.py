@@ -23,6 +23,10 @@ from urllib.request import HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandle
 TOTAL_SECONDS = 180
 START_SECONDS = 120
 HTTP_SECONDS = 30
+# The old 15-second whole-PowerShell limit expired before it could return any
+# snapshot on CI. Measure cold process/CIM/TCP phases within the existing startup
+# budget; this changes neither the 120-second startup nor 180-second total cap.
+METADATA_QUERY_SECONDS = 45
 MAX_RESPONSE = 1024 * 1024
 ENGINE = 'sam2_local_v1'
 SESSION = re.compile(r'^[0-9a-f]{32}$')
@@ -49,23 +53,37 @@ raise SystemExit(child.wait())
 METADATA = r'''param([int]$ShellPid, [int]$OwnerPid)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$clock = [System.Diagnostics.Stopwatch]::StartNew()
+function Phase([string]$name) {
+  [Console]::Error.WriteLine(('WECFU_METADATA_PHASE {0} {1}' -f $name, $clock.ElapsedMilliseconds))
+  [Console]::Error.Flush()
+}
+Phase 'script_started'
 function Row($p) {
   if ($null -eq $p) { return $null }
   return @{ pid=[int]$p.ProcessId; parent=[int]$p.ParentProcessId;
     executable=[string]$p.ExecutablePath; command=[string]$p.CommandLine;
     created_ms=([DateTimeOffset]$p.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds() }
 }
+Phase 'shell_query_started'
 $shell = Get-CimInstance Win32_Process -Filter "ProcessId = $ShellPid"
+Phase 'shell_query_complete'
 if ($null -eq $shell -or $shell.ParentProcessId -ne $OwnerPid) { throw 'Owned shell absent' }
+Phase 'children_query_started'
 $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ShellPid AND Name = 'python.exe'")
+Phase 'children_query_complete'
 if ($children.Count -gt 4) { throw 'Unexpected host inventory' }
 $listeners = @()
 foreach ($child in $children) {
+  Phase 'tcp_query_started'
   $listeners += @(Get-NetTCPConnection -OwningProcess $child.ProcessId -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { @{ pid=[int]$_.OwningProcess; address=[string]$_.LocalAddress; port=[int]$_.LocalPort } })
+  Phase 'tcp_query_complete'
 }
+Phase 'serialization_started'
 @{ shell=(Row $shell); children=@($children | ForEach-Object { Row $_ }); listeners=@($listeners) } |
   ConvertTo-Json -Depth 5 -Compress
+Phase 'completed'
 '''
 
 
@@ -175,20 +193,63 @@ def validate_snapshot(data, *, shell_pid, owner_pid, installed, bundle, manifest
     return {'session': args[7], 'origin': f"http://127.0.0.1:{listener['port']}", 'identity': identity}
 
 
-def read_metadata(script, shell_pid, owner_pid, deadline):
+def safe_metadata_phases(raw):
+    """Keep only our fixed phase names and bounded elapsed numbers, never stderr."""
+    if isinstance(raw, str):
+        raw = raw.encode('utf-8', errors='replace')
+    if not isinstance(raw, bytes):
+        return []
+    allowed = {'script_started', 'shell_query_started', 'shell_query_complete',
+               'children_query_started', 'children_query_complete', 'tcp_query_started',
+               'tcp_query_complete', 'serialization_started', 'completed'}
+    rows = []
+    for line in raw[:MAX_RESPONSE].splitlines():
+        match = re.fullmatch(rb'WECFU_METADATA_PHASE ([a-z_]+) ([0-9]{1,6})', line)
+        if match:
+            phase, millis = match[1].decode('ascii'), int(match[2])
+            if phase in allowed and millis <= TOTAL_SECONDS * 1000:
+                rows.append({'phase': phase, 'elapsed_ms': millis})
+                if len(rows) == 32:
+                    break
+    return rows
+
+
+def read_metadata(script, shell_pid, owner_pid, deadline, *, diagnostics=None):
     require(type(shell_pid) is int and shell_pid > 0 and type(owner_pid) is int and owner_pid > 0,
             'Invalid owned process identifier')
     powershell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    timeout = remaining(deadline, METADATA_QUERY_SECONDS)
+    diagnostic = {'timeout_seconds': timeout, 'status': 'started', 'phases': []}
+    if diagnostics is not None:
+        diagnostics.append(diagnostic)
+    started = time.monotonic()
     # Query output contains the host command/capability and is NEVER saved.
-    result = subprocess.run([str(powershell), '-NoLogo', '-NoProfile', '-NonInteractive',
-        '-File', str(script), str(shell_pid), str(owner_pid)], stdin=subprocess.DEVNULL,
-        capture_output=True, timeout=remaining(deadline, 15), check=False)
-    require(result.returncode == 0 and len(result.stdout) <= MAX_RESPONSE,
-            'Cannot read owned Windows process/TCP metadata')
     try:
-        return json.loads(result.stdout.decode('utf-8-sig'))
-    except (ValueError, UnicodeError):
-        raise SmokeFailure('Invalid owned Windows metadata response') from None
+        result = subprocess.run([str(powershell), '-NoLogo', '-NoProfile', '-NonInteractive',
+            '-File', str(script), str(shell_pid), str(owner_pid)], stdin=subprocess.DEVNULL,
+            capture_output=True, timeout=timeout, check=False)
+        diagnostic['phases'] = safe_metadata_phases(result.stderr)
+        diagnostic['returncode'] = result.returncode
+        diagnostic['status'] = 'process_returned'
+        require(result.returncode == 0 and len(result.stdout) <= MAX_RESPONSE,
+                'Cannot read owned Windows process/TCP metadata')
+        try:
+            value = json.loads(result.stdout.decode('utf-8-sig'))
+        except (ValueError, UnicodeError):
+            diagnostic['status'] = 'invalid_response'
+            raise SmokeFailure('Invalid owned Windows metadata response') from None
+        diagnostic['status'] = 'completed'
+        return value
+    except subprocess.TimeoutExpired as error:
+        diagnostic['phases'] = safe_metadata_phases(error.stderr)
+        diagnostic['status'] = 'timeout'
+        phase = diagnostic['phases'][-1]['phase'] if diagnostic['phases'] else 'powershell_startup'
+        raise SmokeFailure('Owned Windows metadata timed out during ' + phase) from None
+    except OSError:
+        diagnostic['status'] = 'spawn_failed'
+        raise SmokeFailure('Cannot start owned Windows metadata query') from None
+    finally:
+        diagnostic['seconds'] = time.monotonic() - started
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -236,6 +297,7 @@ def run(installed, bundle, manifest, output, expected_exe_sha256, outer_deadline
     output.mkdir(parents=True, exist_ok=False)
     record = {'status': 'failed', 'mode': 'installed_shell_boot_and_forced_owned_cleanup',
               'total_budget_seconds': TOTAL_SECONDS, 'model_requests': 0, 'model_retries': 0,
+              'phase': 'preflight', 'metadata_queries': [],
               'ui_automation': False, 'graceful_close_tested': False, 'metadata_sources': SOURCES,
               'limitations': ['Process/API smoke only; no rendered WebView, Save As, Explorer, drag/drop or Windows11 GUI acceptance.',
                               'Forced Job termination is tested. Session files are retained; normal window-close cleanup is not tested.']}
@@ -258,6 +320,7 @@ def run(installed, bundle, manifest, output, expected_exe_sha256, outer_deadline
                               cwd=installed.parent, env=env, stdin=subprocess.PIPE,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         process.stdin.close()
+        record['phase'] = 'waiting_for_shell'
         startup_deadline = min(started + START_SECONDS, deadline - 15)
         shell_pid = None; capability = None
         while time.monotonic() < startup_deadline:
@@ -272,7 +335,9 @@ def run(installed, bundle, manifest, output, expected_exe_sha256, outer_deadline
                             'Invalid installed shell launch receipt')
                     shell_pid = data['pid']
             if shell_pid is not None:
-                raw = read_metadata(metadata, shell_pid, process.pid, startup_deadline)
+                record['phase'] = 'startup_metadata'
+                raw = read_metadata(metadata, shell_pid, process.pid, startup_deadline,
+                                    diagnostics=record['metadata_queries'])
                 capability = validate_snapshot(raw, shell_pid=shell_pid, owner_pid=process.pid,
                     installed=installed, bundle=bundle, manifest=manifest, temp_root=temp_root, launched_ms=launched_ms)
                 if capability is not None:
@@ -281,9 +346,12 @@ def run(installed, bundle, manifest, output, expected_exe_sha256, outer_deadline
         require(capability is not None, 'Installed shell did not become ready within 120 seconds')
         record['ready_seconds'] = time.monotonic() - started
         record['identity'] = capability['identity']
+        record['phase'] = 'authenticated_http_checks'
         record['http_checks'] = check_http(capability, min(time.monotonic() + HTTP_SECONDS, deadline - 5))
         require(process.poll() is None, 'Installed shell exited during HTTP checks')
-        after = validate_snapshot(read_metadata(metadata, shell_pid, process.pid, deadline - 5),
+        record['phase'] = 'metadata_identity_recheck'
+        after = validate_snapshot(read_metadata(metadata, shell_pid, process.pid, deadline - 5,
+                                               diagnostics=record['metadata_queries']),
             shell_pid=shell_pid, owner_pid=process.pid, installed=installed, bundle=bundle, manifest=manifest,
             temp_root=temp_root, launched_ms=launched_ms, expected_identity=capability['identity'])
         require(after is not None and after['origin'] == capability['origin'] and after['session'] == capability['session'],
@@ -291,6 +359,7 @@ def run(installed, bundle, manifest, output, expected_exe_sha256, outer_deadline
         require(sha(installed) == expected_exe_sha256 and sha(bundle / 'bundle-manifest.json') == manifest_sha,
                 'Installed source binding changed during native smoke')
         record['status'] = 'passed'
+        record['phase'] = 'completed'
     except Exception as error:
         # Network/OS exceptions can embed the bootstrap URL or command line.
         # Only our fixed SmokeFailure messages are safe to publish.

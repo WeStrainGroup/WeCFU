@@ -122,6 +122,135 @@ def test_readiness_waits_but_identity_changes_or_disappearance_after_ready_fail(
         smoke.validate_snapshot(data, **kwargs, expected_identity=identity)
 
 
+@pytest.mark.parametrize('outcome', ['success', 'timeout', 'invalid_json', 'nonzero'])
+def test_metadata_diagnostics_keep_only_fixed_phases_and_never_raw_capabilities(tmp_path, monkeypatch, outcome):
+    monkeypatch.setenv('SystemRoot', str(tmp_path/'Windows'))
+    stderr = ('raw private ?desktop_session=' + TOKEN + '\n'
+              'WECFU_METADATA_PHASE script_started 0\n'
+              'WECFU_METADATA_PHASE shell_query_started 2\n'
+              'WECFU_METADATA_PHASE not_allowed 3\n'
+              'WECFU_METADATA_PHASE completed 999999\n').encode()
+    captured = []
+    def execute(command, **kwargs):
+        captured.append(kwargs['timeout'])
+        assert command[-2:] == ['20', '10'] and '-NonInteractive' in command
+        assert kwargs['capture_output'] is True and kwargs['check'] is False
+        if outcome == 'timeout':
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'], output=TOKEN.encode(), stderr=stderr)
+        return SimpleNamespace(returncode=1 if outcome == 'nonzero' else 0, stderr=stderr,
+                               stdout=b'not-json '+TOKEN.encode() if outcome == 'invalid_json' else json.dumps({'secret':TOKEN}).encode())
+    monkeypatch.setattr(smoke.subprocess, 'run', execute)
+    diagnostics = []
+    call = lambda: smoke.read_metadata(tmp_path/'query.ps1', 20, 10, time.monotonic()+2, diagnostics=diagnostics)
+    if outcome == 'success':
+        assert call() == {'secret': TOKEN}
+    else:
+        with pytest.raises(smoke.SmokeFailure) as failure: call()
+        assert TOKEN not in str(failure.value)
+        if outcome == 'timeout': assert 'shell_query_started' in str(failure.value)
+    assert 0 < captured[0] <= 2 < smoke.METADATA_QUERY_SECONDS
+    assert TOKEN not in json.dumps(diagnostics)
+    assert diagnostics[0]['phases'] == [{'phase':'script_started', 'elapsed_ms':0}, {'phase':'shell_query_started', 'elapsed_ms':2}]
+    assert diagnostics[0]['seconds'] >= 0
+    assert diagnostics[0]['status'] == {'success':'completed','timeout':'timeout','invalid_json':'invalid_response','nonzero':'process_returned'}[outcome]
+
+
+def test_metadata_timeout_before_script_start_has_safe_specific_phase(tmp_path, monkeypatch):
+    monkeypatch.setenv('SystemRoot', str(tmp_path/'Windows'))
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired('sensitive '+TOKEN, kwargs['timeout'], stderr=TOKEN.encode())
+    monkeypatch.setattr(smoke.subprocess, 'run', timeout)
+    diagnostics = []
+    with pytest.raises(smoke.SmokeFailure, match='powershell_startup'):
+        smoke.read_metadata(tmp_path/'query.ps1', 20, 10, time.monotonic()+120, diagnostics=diagnostics)
+    assert diagnostics[0]['timeout_seconds'] == 45 and diagnostics[0]['phases'] == []
+    assert TOKEN not in json.dumps(diagnostics)
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Exercises actual local Windows CIM/TCP metadata with owned synthetic processes')
+def test_windows_native_metadata_on_owned_dummy_host_and_loopback_socket(tmp_path, record_property):
+    """Cold metadata integration gate; no installer, GUI, model or user files."""
+    from wecfu.platform_runtime import spawn_owned, stop_owned
+    deadline = time.monotonic() + smoke.START_SECONDS
+    bundle = tmp_path/'synthetic bundle'; bundle.mkdir()
+    temp_root = tmp_path/'session-temp'; temp_root.mkdir()
+    workspace = temp_root/('wecfu-desktop-session-'+'c'*32); workspace.mkdir()
+    host = bundle/'entry.py'
+    host.write_text('''import argparse,json,socket,time
+from pathlib import Path
+parser=argparse.ArgumentParser()
+parser.add_argument('--resource-root');parser.add_argument('--session-id');parser.add_argument('--workspace-root')
+args=parser.parse_args()
+with socket.socket() as listener:
+ listener.bind(('127.0.0.1',0));listener.listen(1)
+ Path(args.resource_root,'host-ready.json').write_text(json.dumps({'port':listener.getsockname()[1]}),encoding='utf-8')
+ time.sleep(120)
+''', encoding='utf-8')
+    shell = tmp_path/'dummy-shell.py'
+    shell.write_text('''import subprocess,sys
+child=subprocess.Popen([sys.executable,'-I','-B',sys.argv[1],'--resource-root',sys.argv[2],'--session-id',sys.argv[3],'--workspace-root',sys.argv[4]],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+raise SystemExit(child.wait())
+''', encoding='utf-8')
+    owner = tmp_path/'dummy-owner.py'
+    owner.write_text('''import json,subprocess,sys
+from pathlib import Path
+child=subprocess.Popen([sys.executable,'-B',*sys.argv[1:6]],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+Path(sys.argv[6]).write_text(json.dumps({'pid':child.pid}),encoding='utf-8')
+raise SystemExit(child.wait())
+''', encoding='utf-8')
+    script = tmp_path/'metadata.ps1'; script.write_text(smoke.METADATA, encoding='utf-8-sig')
+    launch = tmp_path/'launch.json'
+    diagnostics = []; retired = False; process = None
+    try:
+        launched_ms = int(time.time()*1000)
+        process = spawn_owned([sys.executable, '-B', str(owner), str(shell), str(host), str(bundle), TOKEN,
+                               str(workspace), str(launch)], cwd=tmp_path, stdin=subprocess.PIPE,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        process.stdin.close()
+        ready_deadline = min(deadline - 90, time.monotonic()+20)
+        ready = bundle/'host-ready.json'
+        launched = listener = None
+        while launched is None or listener is None:
+            assert process.poll() is None, 'Synthetic owned process exited before readiness'
+            if launch.is_file() and ready.is_file():
+                try:
+                    launched = json.loads(launch.read_text(encoding='utf-8'))
+                    listener = json.loads(ready.read_text(encoding='utf-8'))
+                except ValueError:
+                    launched = listener = None
+                if launched is not None and listener is not None:
+                    break
+            smoke.remaining(ready_deadline, 1)
+            time.sleep(.05)
+        shell_pid = launched['pid']
+        # This synthetic manifest deliberately names the existing test Python;
+        # it tests metadata identity, not the production manifest validator.
+        manifest = {'python': sys.executable, 'entrypoint': host.name}
+        snapshot = smoke.read_metadata(script, shell_pid, process.pid, deadline - 5, diagnostics=diagnostics)
+        kwargs = dict(shell_pid=shell_pid, owner_pid=process.pid, installed=Path(sys.executable),
+                      bundle=bundle, manifest=manifest, temp_root=temp_root, launched_ms=launched_ms)
+        capability = smoke.validate_snapshot(snapshot, **kwargs)
+        assert capability is not None and capability['session'] == TOKEN
+        assert capability['origin'] == 'http://127.0.0.1:' + str(listener['port'])
+        second = smoke.read_metadata(script, shell_pid, process.pid, deadline - 5, diagnostics=diagnostics)
+        assert smoke.validate_snapshot(second, **kwargs, expected_identity=capability['identity']) == capability
+        for row in diagnostics:
+            assert row['status'] == 'completed'
+            assert row['phases'][0]['phase'] == 'script_started'
+            assert row['phases'][-1]['phase'] == 'completed'
+            assert any(phase['phase'] == 'tcp_query_complete' for phase in row['phases'])
+    finally:
+        try:
+            if process is not None:
+                stop_owned(process, timeout=5)
+                retired = True
+        finally:
+            encoded = json.dumps({'metadata_queries': diagnostics, 'forced_job_retired': retired,
+                                  'ui_automation': False, 'model_requests': 0}, ensure_ascii=False)
+            assert TOKEN not in encoded
+            record_property('native_metadata_diagnostics', encoded)
+
+
 class Response:
     def __init__(self, status, payload): self.status, self.payload = status, payload
     def __enter__(self): return self
@@ -179,7 +308,7 @@ def test_run_owns_shell_and_always_retires_job_with_redacted_evidence(tmp_path, 
         Path(command[4]).write_text('{"pid":20}', encoding='utf-8')
         events.append('spawn_owned')
         return process
-    def metadata(*unused):
+    def metadata(*unused, **unused_kwargs):
         if failure == 'secret_exception':
             raise RuntimeError('private URL ?desktop_session=' + TOKEN)
         if failure == 'expired_deadline':
