@@ -25,6 +25,7 @@ PUBLIC_JSON = {
 }
 REQUIRED_PRODUCT_FILES = {
     "wecfu/setup_models.py", "wecfu/runtime_paths.py", "wecfu/runtime_bootstrap.py", "wecfu/cli.py",
+    "wecfu/platform_runtime.py",
     "wecfu/server/app.py", "wecfu/server/web.py",
     "wecfu/server/sam_runtime.py", "wecfu/server/sam_worker.py",
     "wecfu/server/sam_warm_pool.py", "wecfu/experiments/segmentation.py",

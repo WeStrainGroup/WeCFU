@@ -1,18 +1,20 @@
-# Install and run WeCFU 1.2.3
+# Install and run WeCFU 1.2.4
 
 ## Local installation
 
-This release requires **Python 3.12**, including Lite/Custom-only installations. Ultra runs on Linux CPU or
-macOS CPU/MPS. Windows supports Lite, Custom and manual marking; Ultra is not
-supported there. CUDA is not a supported device setting.
+This release requires **Python 3.12**, including Lite/Custom-only installations.
+Ultra supports macOS CPU/MPS, Linux CPU and Windows x64 CPU. Windows ARM and
+CUDA are not supported. The Conda package and native desktop installers have
+separate installation checks; a desktop test does not establish Conda acceptance
+on the same operating system.
 
 ```sh
-conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.3 -y
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.4 -y
 conda activate wecfu
 wecfu serve
 ```
 
-On macOS and Linux, the first `wecfu serve` prepares Ultra before opening the
+On supported systems, the first `wecfu serve` prepares Ultra before opening the
 page. It installs pinned model dependencies in a separate environment inside
 the user model cache, obtains official SAM source at a fixed revision, and
 downloads the approximately **156 MB SAM checkpoint**. It verifies the files
@@ -55,7 +57,7 @@ a new package does not update an already running process.
 
 ```sh
 conda activate wecfu
-conda install -c westraingroup -c conda-forge python=3.12 wecfu=1.2.3 -y
+conda install -c westraingroup -c conda-forge python=3.12 wecfu=1.2.4 -y
 wecfu serve
 ```
 
@@ -100,7 +102,7 @@ Do not store photographs or results in the model cache.
 ```sh
 git clone https://github.com/WeStrainGroup/WeCFU.git
 cd WeCFU
-git checkout v1.2.3
+git checkout v1.2.4
 conda create -n wecfu-source -c conda-forge python=3.12 pip -y
 conda activate wecfu-source
 python -m pip install '.[dev]'
@@ -108,7 +110,7 @@ wecfu serve
 ```
 
 The same automatic model preparation applies. Maintainers building a managed
-runtime can install the pinned `models` extra instead; Linux CPU installations
+runtime can install the pinned `models` extra instead; Linux and Windows CPU installations
 should use the official CPU PyTorch wheels specified in the Dockerfile. Do not
 install an unrelated `sam2` package: WeCFU verifies its supported official
 source revision.
@@ -117,7 +119,8 @@ source revision.
 
 `WECFU_MODEL_HOME` selects the model cache. The default is
 `~/Library/Caches/WeCFU/models` on macOS and `$XDG_CACHE_HOME/wecfu/models`
-(normally `~/.cache/wecfu/models`) on Linux. Existing files with incorrect hashes
+(normally `~/.cache/wecfu/models`) on Linux, and `%LOCALAPPDATA%\WeCFU\models`
+on Windows. Existing files with incorrect hashes
 are rejected rather than silently overwritten.
 
 ```sh
@@ -132,7 +135,7 @@ runs as well.
   otherwise startup uses the prepared runtime. `WECFU_CV_PYTHON` can select the
   image-processing interpreter.
 - `WECFU_SAM_DEVICE=cpu` explicitly selects CPU. During normal startup, macOS
-  chooses MPS when it is available, otherwise CPU; Linux uses CPU. An explicit
+  chooses MPS when it is available, otherwise CPU; Linux and Windows use CPU. An explicit
   device setting is respected and reports an error if unavailable. A failed
   recognition request is not rerun automatically on another device.
 - Warm SAM workers are enabled by default. They keep the model loaded between

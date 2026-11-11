@@ -1,4 +1,4 @@
-# Using WeCFU 1.2.3
+# Using WeCFU 1.2.4
 
 For installation and model setup, see [INSTALL.md](INSTALL.md).
 
@@ -7,6 +7,8 @@ For installation and model setup, see [INSTALL.md](INSTALL.md).
 Use **Add images**, or drop JPG, JPEG, PNG, TIF or TIFF files/folders into the
 page. The local app also accepts an image or folder path. Importing only adds
 photos; opening one does not run recognition. Original files are not modified.
+In the native desktop app, **Choose folder** opens the system folder picker
+and imports photos from that folder and its subfolders. Cancelling changes nothing.
 
 The local and hosted apps offer three modes:
 
@@ -16,7 +18,7 @@ The local and hosted apps offer three modes:
   not tune SAM.
 
 If Ultra cannot run, it reports the problem; select Lite explicitly for the
-non-model route. Ultra currently supports macOS and Linux, not Windows.
+non-model route. Ultra supports macOS CPU/MPS, Linux CPU and Windows x64 CPU.
 The interface starts in English and remembers a supported language choice:
 English, Simplified Chinese, French or Russian.
 
@@ -50,6 +52,8 @@ Custom **Recognize all** can replace existing machine-only results. It skips
 manual edits, notes, manually adjusted boundaries, pure manual mode and human
 verification records. Merely viewing a photo is not such protection. For a
 protected current photo, recounting requires confirmation and can be undone.
+A photo in pure manual mode must first be switched through **More → Mode →
+Automatic + manual correction** before recognition is available.
 
 ## Correct marks and navigate
 
@@ -102,8 +106,10 @@ or manual counting before treating an exported zero as a verified zero.
 
 **Export bundle** adds annotated images and per-image JSON to the CSV in a ZIP.
 It does not include the original input photos. Preparing annotated images can
-take longer than CSV alone. The browser downloads the file; supported local
-browsers can also choose a destination folder.
+take longer than CSV alone. In a browser, the file uses the browser download
+location or a destination you select where supported. In the native desktop
+app, **Save** opens the system Save As dialog; after saving, the complete path
+and a button to reveal the file are shown. Cancelling leaves files unchanged.
 
 Hosted uploads are processed on the server in a temporary visitor workspace:
 up to 100 images, and 400 MiB per upload request. Inactive workspaces are cleaned

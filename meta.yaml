@@ -1,5 +1,5 @@
 {% set name = "wecfu" %}
-{% set version = "1.2.3" %}
+{% set version = "1.2.4" %}
 
 package:
   name: {{ name|lower }}
@@ -61,7 +61,7 @@ about:
     Review plate photos, correct colony markers, and export CSV or ZIP.
     The noarch package includes the interface and classical methods.
     Ultra uses the automatically prepared, isolated SAM runtime and verified model cache
-    on macOS and Linux; see INSTALL.md. It never silently substitutes
+    on macOS, Linux and Windows x64 CPU; see INSTALL.md. It never silently substitutes
     a classical result when a selected model is unavailable.
 
 extra:

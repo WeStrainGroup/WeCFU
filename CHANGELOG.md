@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.4
+
+- Apply the shared import and interface fixes to the Conda and hosted apps as
+  well as the desktop candidates. Fix Windows file-identity checks that could
+  reject an unchanged imported photo. Preserve replacement detection and rollback.
+- Rewrite Help in English, Simplified Chinese, French and Russian for the actual
+  current and batch workflows. Clarify which Custom results are recounted and
+  protected, and that viewing a photo alone does not protect it from recounting.
+- Keep the selected filename and translate completed batch summaries when
+  changing languages; complete the French mode labels.
+- Include Windows x64 CPU runtime support and native desktop integration.
+  Desktop candidates provide a system folder picker and Save As dialog, with
+  separate platform-specific installation and interactive acceptance records.
+- Keep the Ultra/Lite/Custom recognition recipes and model weights unchanged.
+
 ## 1.2.3
 
 - Open the browser only after this local server has successfully started. Use

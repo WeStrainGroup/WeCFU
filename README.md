@@ -1,4 +1,4 @@
-# WeCFU 1.2.3
+# WeCFU 1.2.4
 
 A browser workspace for counting colonies on petri-dish photographs, correcting
 individual markers, and exporting counts with annotated images.
@@ -20,10 +20,10 @@ Changing modes does not change an already saved result.
 
 ## Install locally
 
-This release requires Python 3.12. On macOS or Linux:
+The Conda application requires Python 3.12. On macOS, Linux or Windows x64:
 
 ```sh
-conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.3 -y
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.4 -y
 conda activate wecfu
 wecfu serve
 ```
@@ -34,9 +34,11 @@ the approximately 156 MB SAM checkpoint. Internet access is needed for this
 initial setup; later launches reuse the verified cache. No extra model-wheel
 installation is required in the Conda environment.
 
-Linux uses CPU; macOS supports CPU/MPS. Windows supports Lite, Custom and manual
-marking; Ultra is not supported there. See [INSTALL.md](INSTALL.md) for offline
-startup, upgrades and persistent workspaces.
+Linux and Windows x64 use CPU; macOS supports CPU/MPS. Windows ARM and CUDA
+are not supported. See [INSTALL.md](INSTALL.md) for offline startup, upgrades
+and persistent workspaces. Native desktop installers are maintained separately
+as candidates; see [desktop/README.md](desktop/README.md) for their platform
+and acceptance status.
 
 ## Review and export
 
