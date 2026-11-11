@@ -49,8 +49,12 @@ def _source_identity(image: Path) -> tuple[str, tuple]:
 
 
 def _assert_source_unchanged(image: Path, fingerprint: tuple) -> None:
-    if _fingerprint(image.stat()) != fingerprint:
-        raise SourceChanged("source image changed; reload the displayed image")
+    # Compare handles with handles. On CPython 3.12 for Windows, path stat's
+    # ctime is creation time while fstat's ctime is metadata change time.
+    # Reopening the name also detects replacement/retargeting of the path.
+    with image.open("rb") as current:
+        if _fingerprint(os.fstat(current.fileno())) != fingerprint:
+            raise SourceChanged("source image changed; reload the displayed image")
 
 
 def _sidecar(root: Path, batch: str, name: str, *, create: bool = False) -> Path:

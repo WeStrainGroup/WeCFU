@@ -1920,3 +1920,68 @@ test('native rejection codes become localized actionable messages, without an ex
     assert.equal(v.run('state.busy'), false);
   }
 });
+
+for (const locale of ['en', 'zh-CN', 'fr', 'ru']) {
+  test(`native folder selection imports the chosen path once (${locale})`, async () => {
+    const v = ui(locale), nativeCalls = [];
+    const selected = String.raw`C:\用户资料\photo set\папка`;
+    v.window.__WECFU_DESKTOP_IMPORT__ = true;
+    v.window.__WECFU_DESKTOP_PLATFORM__ = 'windows';
+    v.window.__TAURI__ = {core: {invoke: async (command, args) => {
+      nativeCalls.push({command, args: plain(args)}); return selected;
+    }}};
+    v.run(`jsonRequest = async (url, method, body) => {calls.push({url, method, body:clone(body)}); return {batch:'synthetic'};}; updateControls();`);
+    assert.equal(v.element('btn-choose-folder').hidden, false);
+    assert.equal(v.element('path-input').placeholder, 'C:\\Photos');
+    await v.element('btn-choose-folder').fire('click');
+    assert.deepEqual(nativeCalls, [{command:'desktop_choose_import_folder', args:{locale}}]);
+    assert.deepEqual(plain(v.run('calls')), [{url:'/api/ingest', method:'POST', body:{paths:[selected], view:'unknown', batch:'synthetic'}}]);
+    assert.equal(v.element('path-input').value, selected);
+    assert.equal(v.run('state.busy'), false);
+    assert.equal(v.errors.length, 0);
+  });
+}
+
+test('canceling a native folder picker preserves the session and blocks duplicate requests while open', async () => {
+  const v = ui(); let finish, count = 0;
+  v.window.__WECFU_DESKTOP_IMPORT__ = true;
+  v.window.__TAURI__ = {core:{invoke: () => {count++; return new Promise(resolve => {finish = resolve;});}}};
+  v.element('path-input').value = '/previous/path';
+  const before = plain(v.run('snapshot()'));
+  const pending = v.run('chooseImportFolder()');
+  assert.equal(v.run('state.busy'), true);
+  for (const id of ['btn-choose-folder','btn-ingest','btn-add-images','path-input','btn-recognize-all']) assert.equal(v.element(id).disabled, true, id);
+  await v.run('chooseImportFolder()');
+  assert.equal(count, 1);
+  finish(null); await pending;
+  assert.equal(v.run('state.busy'), false);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.element('path-input').value, '/previous/path');
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+});
+
+test('a failed or invalid native folder selection never imports and releases busy state', async () => {
+  for (const response of ['throw', undefined, '', {}, 'bad\0path']) {
+    const v = ui();
+    v.window.__WECFU_DESKTOP_IMPORT__ = true;
+    v.window.__TAURI__ = {core:{invoke: async () => { if (response === 'throw') throw 'import_unavailable'; return response; }}};
+    await assert.rejects(v.run('chooseImportFolder()'), /chooseFolderFailed/);
+    assert.equal(v.run('state.busy'), false);
+    assert.equal(v.run('calls.length'), 0);
+  }
+});
+
+test('folder import stays unavailable in browsers, hosted sessions, review queues and locked workflows', async () => {
+  const browser = ui(); browser.run('updateControls()');
+  assert.equal(browser.element('btn-choose-folder').hidden, true);
+  await assert.rejects(browser.run('chooseImportFolder()'), /chooseFolderUnavailable/);
+  for (const setup of ["state.config.web_mode=true", "state.busy=true", "state.loading=true", "state.crop={}", "reviewMode=()=>true"]) {
+    const v = ui(); let invoked = false;
+    v.window.__WECFU_DESKTOP_IMPORT__ = true;
+    v.window.__TAURI__ = {core:{invoke: async () => {invoked = true; return '/forbidden';}}};
+    v.run(`${setup}; updateControls();`);
+    await v.run('chooseImportFolder()');
+    assert.equal(invoked, false, setup);
+    assert.equal(v.run('calls.length'), 0);
+  }
+});

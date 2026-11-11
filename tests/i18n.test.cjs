@@ -18,7 +18,7 @@ function loadI18n(storedLanguage) {
 
 const locales = ['en', 'zh-CN', 'fr', 'ru'];
 const helpActions = [
-  'addImages', 'ingestBtn', 'profileDefault', 'profileClassical', 'profileCustom',
+  'addImages', 'chooseFolder', 'ingestBtn', 'profileDefault', 'profileClassical', 'profileCustom',
   'recognizeAll', 'recognizeCurrent', 'stopCounting', 'modelApply', 'modelDiscard',
   'livePreview', 'applyParams', 'openAdjustments',
   'manualMarkSettings', 'imageActions', 'adjustCrop', 'bulkDeleteMode',
@@ -100,13 +100,47 @@ test('Russian has every UI translation and preserves interpolation placeholders'
   }
 });
 
-test('all help locales distinguish recognition, review and temporary sessions', () => {
+test('every locale supplies native folder messages and mode/batch explanations', () => {
+  const { I18N } = loadI18n();
+  const keys = ['chooseFolder', 'chooseFolderTitle', 'chooseFolderFailed', 'chooseFolderUnavailable',
+    'modeInfoUltra', 'modeInfoLite', 'modeInfoCustom', 'customBatchScopeHint',
+    'countCompleted', 'countSkipped', 'batchAlreadyCounted', 'batchProtected'];
+  for (const locale of locales) {
+    for (const key of keys) {
+      assert.equal(typeof I18N[locale][key], 'string', `${locale} must not fall back for ${key}`);
+      assert.ok(I18N[locale][key].trim(), `${locale}: empty ${key}`);
+      if (locale !== 'en') assert.notEqual(I18N[locale][key], I18N.en[key], `${locale}: untranslated ${key}`);
+    }
+  }
+});
+
+test('help separates batch policies, browsing, verification and desktop/browser saving', () => {
   const i18n = loadI18n();
   const facts = {
-    en: [/does not start recognition/, /does not recognize photos/, /unapplied changes are not used/, /existing results first appear as a preview/, /Lite recounts directly/, /Viewing does not confirm/, /opens an empty session/, /Refreshing the page keeps it/, /fully stopping the local server clears/, /workspace .* is retained/, /temporary server session/],
-    'zh-CN': [/导入不会自动识别/, /不执行识别/, /未应用的修改不会用于识别/, /已有结果先显示预览/, /Lite 直接重新计数/, /仅浏览不算确认/, /常规本地启动进入空白会话/, /刷新页面保留当前内容/, /完全停止本地服务后/, /工作区.*保留数据/, /临时服务器会话/],
-    fr: [/L’importation ne lance pas la reconnaissance/, /sans lancer la reconnaissance/, /les changements non appliqués ne sont pas utilisés/, /s’il existe déjà un résultat, un aperçu s’affiche/, /Lite recompte directement/, /Consulter ne vaut pas confirmer/, /démarrage local normal ouvre une session vide/, /Actualiser la page la conserve/, /arrêter complètement le serveur local supprime/, /espace explicitement choisi .* est conservé/, /session temporaire sur le serveur/],
-    ru: [/Импорт не запускает распознавание/, /но не запускает распознавание/, /неприменённые изменения не используются/, /при наличии результата сначала показывает предпросмотр/, /Lite сразу пересчитывает/, /Просмотр не считается подтверждением/, /локальный запуск открывает пустой сеанс/, /Обновление страницы его сохраняет/, /полная остановка локального сервера очищает/, /рабочая область .* сохраняется/, /временный сеанс на сервере/],
+    en: [/does not start recognition/, /does not run recognition/, /Unapplied changes are not used/,
+      /only unrecognized photos/, /recounts machine-only results/, /including withdrawn records/,
+      /Photos you have only viewed are still recounted/, /A dark dot does not mean the result has been verified/,
+      /desktop app.*system folder picker/, /desktop app opens a system save dialog/,
+      /browser uses its download settings/, /Export before closing/, /opens an empty session/,
+      /refreshing keeps the current work/, /workspace.*is retained/, /temporary sessions/],
+    'zh-CN': [/导入后不会自动识别/, /不会立即识别/, /未应用的改动不会用于识别/,
+      /只处理尚未识别的照片/, /重算只有机器结果的照片/, /即使撤回核验，也不会批量重算/,
+      /仅浏览过照片不会导致跳过/, /深灰不代表核验通过/,
+      /桌面版.*系统窗口/, /桌面版会打开系统保存窗口/, /浏览器版按浏览器的下载设置保存/,
+      /关闭前请先导出/, /常规本地启动进入空白会话/, /刷新页面会保留当前内容/, /工作区会保留数据/, /临时会话/],
+    fr: [/L’importation ne lance pas la reconnaissance/, /sans lancer de comptage/, /Les changements non appliqués ne sont pas utilisés/,
+      /uniquement les photos non encore reconnues/, /recalcule aussi les résultats purement automatiques/,
+      /ayant un historique de vérification sont également exclues, même après le retrait/, /photo simplement consultée peut toujours être recalculée/,
+      /Gris foncé.*sans garantie de vérification/, /application de bureau.*sélecteur de dossiers/,
+      /application de bureau ouvre la fenêtre d’enregistrement/, /navigateur.*réglages de téléchargement/,
+      /Exportez avant de fermer/, /ouvre une session vide/, /actualiser la page conserve/, /espace choisi.*est conservé/, /sessions temporaires/],
+    ru: [/импорт не запускает распознавание/, /не запуская распознавание/, /Неприменённые изменения не используются/,
+      /только ещё не распознанные фотографии/, /пересчитывает и готовые машинные результаты/,
+      /не пересчитываются пакетно, даже если подтверждение отозвано/, /Один лишь просмотр фотографии не мешает пересчёту/,
+      /Тёмно-серый.*не подтверждение точности/, /настольном приложении.*системное окно выбора папки/,
+      /Настольное приложение открывает системное окно сохранения/, /браузер использует свои настройки загрузки/,
+      /Экспортируйте результаты перед закрытием/, /локальный запуск открывает пустой сеанс/,
+      /обновление страницы сохраняет/, /Рабочая область.*сохраняется между запусками/, /временные сеансы/],
   };
   for (const locale of locales) {
     i18n.setLang(locale);

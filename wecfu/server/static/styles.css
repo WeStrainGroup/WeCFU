@@ -46,6 +46,7 @@ aside#sidebar { flex: 0 0 244px; min-width: 0; display: flex; flex-direction: co
 .sidebar-heading h2 { margin: 0; color: #6f6f6f; font-size: 12px; font-weight: 600; }
 #btn-add-images { min-height: 29px; padding: 4px 10px; font-size: 11px; color: #6d6d6d; background: #ffffff; }
 .drop-hint { color: #9a9a9a; font-size: 11px; margin: 12px 0 8px; }
+.folder-import-button { width: 100%; margin-top: 10px; }
 #path-import { font-size: 11px; }
 .path-import-content { padding-top: 10px; display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
 .path-import-content p { margin: 0; font-size: 10px; }

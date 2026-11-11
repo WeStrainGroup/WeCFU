@@ -8,6 +8,9 @@ release readiness. The existing Conda/web application version remains 1.2.3.
 - Open WeCFU as a desktop application; Conda, Python and a terminal are not needed.
 - Import plate photographs, select **Ultra**, **Lite**, or **Custom**, and recognize
   the current image or the whole batch.
+- **Choose folder** opens the system folder picker and imports photos from the
+  selected folder and its subfolders. Cancelling leaves the session unchanged.
+  Dragging photos, **Add images**, and entering a local path remain available.
 - Ultra uses the existing algorithm and the fixed SAM recipe. Lite uses the
   existing algorithm alone. This desktop work does not train a model or change
   the numerical recipe.
@@ -44,8 +47,10 @@ launching the backend. The backend binds to an available loopback port and emits
 a bounded readiness message. A per-launch HttpOnly cookie and Host/Origin checks
 protect the local API. The launch capability is removed from page history.
 There are no general frontend filesystem or shell permissions. Four export-only
-commands are authorized for the exact session origin. They accept opaque export
-IDs, not arbitrary filesystem paths. Exports use an OS-selected destination and
+commands and one folder-picker command are authorized for the exact session
+origin. The picker returns only the folder selected by the user; importing still
+uses the authenticated backend. Export commands accept opaque export IDs, not
+arbitrary filesystem paths. Exports use an OS-selected destination and
 a private sibling staging file; the final file is replaced only after a successful
 download. Failed or cancelled downloads leave an existing destination unchanged.
 

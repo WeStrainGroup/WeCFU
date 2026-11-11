@@ -46,13 +46,21 @@ def _fingerprint(stat) -> tuple:
     return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
+def _path_fingerprint(path: Path) -> tuple:
+    # Keep comparisons in the same API domain: Windows path stat and fstat
+    # can give different ctime values (creation time versus change time).
+    # Reopen the path so a replaced file cannot inherit an earlier snapshot.
+    with path.open("rb") as source:
+        return _fingerprint(os.fstat(source.fileno()))
+
+
 def read_source_snapshot(path: Path) -> SourceSnapshot:
     """Hash and decode the same bytes, rejecting concurrent file replacement."""
     with path.open("rb") as source:
         before = _fingerprint(os.fstat(source.fileno()))
         payload = source.read()
         after = _fingerprint(os.fstat(source.fileno()))
-    if before != after or _fingerprint(path.stat()) != after or len(payload) != after[2]:
+    if before != after or _path_fingerprint(path) != after or len(payload) != after[2]:
         raise ReferenceChanged("source image changed while reading; reload the reference view")
     pixels = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
     if pixels is None:
@@ -62,7 +70,7 @@ def read_source_snapshot(path: Path) -> SourceSnapshot:
 
 
 def assert_source_unchanged(path: Path, snapshot: SourceSnapshot) -> None:
-    if _fingerprint(path.stat()) != snapshot.fingerprint:
+    if _path_fingerprint(path) != snapshot.fingerprint:
         raise ReferenceChanged("source image changed; reload the reference view before confirming")
 
 

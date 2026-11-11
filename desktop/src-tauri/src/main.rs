@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod exports;
+mod imports;
 mod manifest;
 mod process;
 mod protocol;
@@ -32,6 +33,7 @@ struct Shared {
     status: Mutex<BootStatus>,
     origin: Mutex<Option<String>>,
     exports: Mutex<exports::Book>,
+    import_chooser: imports::Chooser,
     shutdown: AtomicBool,
     host_done: AtomicBool,
 }
@@ -47,6 +49,7 @@ impl Shared {
             }),
             origin: Mutex::new(None),
             exports: Mutex::new(exports::Book::default()),
+            import_chooser: imports::Chooser::default(),
             shutdown: AtomicBool::new(false),
             host_done: AtomicBool::new(false),
         }
@@ -223,9 +226,10 @@ fn run_host(
                         .permission("allow-desktop-export-prepare")
                         .permission("allow-desktop-export-arm")
                         .permission("allow-desktop-export-cancel")
-                        .permission("allow-desktop-export-reveal"),
+                        .permission("allow-desktop-export-reveal")
+                        .permission("allow-desktop-choose-import-folder"),
                 )
-                .map_err(|_| "Cannot authorize native export controls.".to_string())?;
+                .map_err(|_| "Cannot authorize native application controls.".to_string())?;
                 *shared.origin.lock().unwrap() = Some(origin);
                 let window = app
                     .get_webview_window("main")
@@ -340,7 +344,8 @@ fn main() {
             exports::desktop_export_prepare,
             exports::desktop_export_arm,
             exports::desktop_export_cancel,
-            exports::desktop_export_reveal
+            exports::desktop_export_reveal,
+            imports::desktop_choose_import_folder
         ])
         .setup(move |app| {
             let navigation = setup_state.clone();
@@ -352,7 +357,7 @@ fn main() {
                     .min_inner_size(960.0, 640.0)
                     .incognito(true)
                     .initialization_script(format!(
-                "window.__WECFU_DESKTOP_EXPORT__=true;window.__WECFU_DESKTOP_PLATFORM__={};",
+                "window.__WECFU_DESKTOP_EXPORT__=true;window.__WECFU_DESKTOP_IMPORT__=true;window.__WECFU_DESKTOP_PLATFORM__={};",
                 serde_json::to_string(if cfg!(target_os = "macos") {
                     "macos"
                 } else if cfg!(windows) {

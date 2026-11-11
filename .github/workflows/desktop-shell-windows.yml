@@ -52,7 +52,7 @@ jobs:
           if ($tests.Count -eq 0) { throw "Missing frontend tests" }
           node --test @tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q tests/test_windows_installer_acceptance.py tests/test_windows_shell_smoke.py tests/test_desktop_host.py --junitxml=desktop-acceptance/acceptance-contracts.xml
+          python -m pytest -q tests/test_windows_installer_acceptance.py tests/test_windows_shell_smoke.py tests/test_desktop_host.py tests/test_source_file_identity.py -o junit_logging=system-out --junitxml=desktop-acceptance/acceptance-contracts.xml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify native backend transport and shutdown
         run: python tools/desktop_acceptance.py --transport-only --output desktop-acceptance/transport

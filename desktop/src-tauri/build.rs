@@ -6,6 +6,7 @@ fn main() {
             "desktop_export_arm",
             "desktop_export_cancel",
             "desktop_export_reveal",
+            "desktop_choose_import_folder",
         ]),
     ))
     .expect("failed to build WeCFU desktop permissions");

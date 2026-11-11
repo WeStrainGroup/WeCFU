@@ -383,7 +383,9 @@ function updateControls() {
   if (restrictedReview()) $('mode-select').value = manualOnlyReview() ? 'manual' : 'auto';
   $('mode-select').disabled = locked || restrictedReview();
   for (const id of [...Object.values(PARAM_IDS), ...Object.values(paramControls.SPECS).map(spec => `s-${spec.id}`), 'preset-select', 'p-radius', 'p-preview', 'btn-defaults']) $(id).disabled = locked;
-  for (const id of ['btn-add-images', 'btn-ingest']) $(id).disabled = locked;
+  for (const id of ['btn-add-images', 'btn-ingest', 'btn-choose-folder', 'path-input']) $(id).disabled = locked;
+  $('btn-choose-folder').hidden = !desktopImportMode() || reviewMode() || Boolean(state.config?.web_mode);
+  $('path-input').placeholder = window.__WECFU_DESKTOP_PLATFORM__ === 'windows' ? 'C:\\Photos' : '/path/to/photos';
   $('btn-run').disabled = locked || !state.imageList.length || $('mode-select').value === 'manual' || modelMethod();
   $('p-preview').disabled = locked;
   for (const id of ['btn-export-csv', 'btn-export-zip']) $(id).disabled = locked || !state.imageList.length;
@@ -1750,6 +1752,24 @@ async function countCustomBatch() {
   }
 }
 
+function desktopImportMode() { return window.__WECFU_DESKTOP_IMPORT__ === true; }
+async function chooseImportFolder() {
+  if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending() || state.config?.web_mode) return;
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!desktopImportMode() || typeof invoke !== 'function') throw new Error(t('chooseFolderUnavailable'));
+  let path;
+  state.busy = true; updateControls();
+  try {
+    try { path = await invoke('desktop_choose_import_folder', {locale: getLang()}); }
+    catch (error) { throw new Error(t('chooseFolderFailed'), {cause: error}); }
+    if (path !== null && (typeof path !== 'string' || !path.trim() || path.includes('\0'))) {
+      throw new Error(t('chooseFolderFailed'));
+    }
+  } finally { state.busy = false; updateControls(); }
+  if (path === null) return;
+  $('path-input').value = path;
+  await ingestPath(path);
+}
 async function ingestPath(path) {
   if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
   clearModelPreview();
@@ -2075,6 +2095,7 @@ function onKeyDown(event) {
 function wireUpHandlers() {
   const actions = {
     'btn-ingest': () => { const path = $('path-input').value.trim(); if (path) return ingestPath(path); },
+    'btn-choose-folder': chooseImportFolder,
     'btn-add-images': () => { if (!reviewMode()) $('file-input').click(); }, 'btn-remove-image': removeImage,
     'btn-bulk-select': toggleBulkSelection, 'btn-bulk-all': toggleAllBulkImages,
     'btn-bulk-delete': removeSelectedImages,
