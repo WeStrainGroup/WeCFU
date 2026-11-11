@@ -1616,7 +1616,7 @@ async function countAll() {
     setStatus(`${t(state.cancelRun ? 'countStopped' : 'statusDone')} · ${count} ${t('countCompleted')} · ${skipped} ${t('countSkipped')}`);
   } finally { state.busy = false; $('btn-stop-run').hidden = true; updateControls(); refreshMaskPreview(); }
 }
-function renderBatchReport(report) {
+function renderBatchReport(report, {updateStatus = true} = {}) {
   const records = report.results, total = report.total;
   const completed = records.filter(r => r.status === 'completed').length;
   const skipped = records.filter(r => r.status === 'skipped').length;
@@ -1634,7 +1634,7 @@ function renderBatchReport(report) {
     fragment.appendChild(row);
   }
   $('batch-report-items').replaceChildren(fragment);
-  if (!state.batchRun.active) setStatus(text, failed > 0);
+  if (updateStatus && !state.batchRun.active) setStatus(text, failed > 0);
 }
 function batchReason(reason) {
   const keys = {already_counted: 'batchAlreadyCounted', existing_marks: 'batchProtected',
@@ -2066,6 +2066,9 @@ function populateLangSelect() {
   $('lang-select').value = getLang();
   $('lang-select').addEventListener('change', event => {
     setLang(event.target.value); renderImageList(); updateControls(); syncSliders();
+    // applyI18n resets static placeholders; restore the current photo's identity.
+    $('current-name').textContent = state.imageName || t('selectAnImage');
+    if (state.batchRun.report) renderBatchReport(state.batchRun.report, {updateStatus: false});
     syncExportModal();
     $('help-body').innerHTML = t('helpBody');
     focusAfterSelect(event.currentTarget || $('lang-select'));

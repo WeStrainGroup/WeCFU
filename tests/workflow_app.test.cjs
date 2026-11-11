@@ -1985,3 +1985,25 @@ test('folder import stays unavailable in browsers, hosted sessions, review queue
     assert.equal(v.run('calls.length'), 0);
   }
 });
+
+test('switching language retains the photo identity and translates the existing batch report without replacing current status', async () => {
+  const v = ui('en');
+  v.run(`
+    state.imageName='已导入 photo.png';
+    state.batchRun.report={total:2,results:[{name:'已导入 photo.png',status:'completed'},{name:'old.png',status:'skipped',reason:'already_counted'}]};
+    renderBatchReport(state.batchRun.report);
+    populateLangSelect();
+    $('status').textContent='Keep current operation status';
+    $('current-name').textContent='Select an image';
+  `);
+  const before = plain(v.run('snapshot()'));
+  v.element('lang-select').value = 'zh-CN';
+  await v.element('lang-select').fire('change');
+  assert.equal(v.element('current-name').textContent, '已导入 photo.png');
+  assert.match(v.element('batch-report-summary').textContent, /^完成/);
+  assert.doesNotMatch(v.element('batch-report-summary').textContent, /counted|preserved|Failed/);
+  assert.equal(v.element('status').textContent, 'Keep current operation status');
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.run('saves.length'), 0);
+});
