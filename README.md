@@ -31,7 +31,8 @@ wecfu serve
 The first launch prepares and checks Ultra before opening the browser: fixed
 model dependencies in a separate cached environment, official SAM source, and
 the approximately 156 MB SAM checkpoint. Internet access is needed for this
-initial setup; later launches reuse the verified cache. No extra model-wheel
+initial setup; later launches reuse the verified cache. If preparation fails,
+the terminal explains why and Lite remains available. No extra model-wheel
 installation is required in the Conda environment.
 
 Linux and Windows x64 use CPU; macOS supports CPU/MPS. Windows ARM and CUDA
@@ -42,8 +43,10 @@ and acceptance status.
 
 ## Review and export
 
-1. Add photos or drag in a folder. Importing or opening a photo does not run
-   recognition. No front/blank/back selection is required.
+1. Add photos, choose a folder or drag files into the page. Folder selection
+   includes supported photos in subfolders and uses directory upload in supported
+   browsers. Importing or opening a photo does not run recognition. No
+   front/blank/back selection is required.
 2. Choose **Recognize all** to process unrecognized photos in Ultra or Lite.
    Existing results, including zero counts, and manual work are preserved.
    Processing is serial; you can stop after the current photo.
@@ -53,7 +56,8 @@ and acceptance status.
 4. In **Custom**, adjust the controls, choose **Apply**, then recognize the
    current photo or all photos. Apply only commits the settings. Custom batch
    recognition can replace machine results, but skips manual edits, notes,
-   manually adjusted boundaries, manual mode and human verification records.
+   manually adjusted boundaries, pure manual mode and human verification records.
+   Viewing a photo alone does not exempt it from Custom batch recognition.
 5. Correct missing or incorrect markers, add notes, then export CSV or a ZIP
    containing the CSV, annotated images and per-image JSON.
 

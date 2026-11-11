@@ -5,6 +5,8 @@
 - Apply the shared import and interface fixes to the Conda and hosted apps as
   well as the desktop candidates. Fix Windows file-identity checks that could
   reject an unchanged imported photo. Preserve replacement detection and rollback.
+- Add folder selection to the local and hosted browser interface using directory
+  upload, alongside the native desktop folder picker.
 - Rewrite Help in English, Simplified Chinese, French and Russian for the actual
   current and batch workflows. Clarify which Custom results are recounted and
   protected, and that viewing a photo alone does not protect it from recounting.

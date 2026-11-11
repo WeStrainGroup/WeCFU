@@ -5,10 +5,12 @@ For installation and model setup, see [INSTALL.md](INSTALL.md).
 ## Add and recognize photos
 
 Use **Add images**, or drop JPG, JPEG, PNG, TIF or TIFF files/folders into the
-page. The local app also accepts an image or folder path. Importing only adds
-photos; opening one does not run recognition. Original files are not modified.
-In the native desktop app, **Choose folder** opens the system folder picker
-and imports photos from that folder and its subfolders. Cancelling changes nothing.
+page. **Choose folder** selects a folder and includes supported photos from its
+subfolders. In a browser, this uses directory upload where supported; in the
+native desktop candidate (1.3.0-rc.1), it uses the system folder picker. Cancelling
+changes nothing. The local browser app also accepts a typed image or folder path.
+Importing only adds photos; opening one does not run recognition. Original files
+are not modified.
 
 The local and hosted apps offer three modes:
 
