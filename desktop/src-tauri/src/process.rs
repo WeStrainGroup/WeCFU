@@ -195,6 +195,40 @@ mod posix {
     mod tests {
         use super::*;
         #[test]
+        fn orderly_host_exit_cleans_workspace_without_following_input_links() {
+            let source = Workspace::new().unwrap();
+            let source_file = source.path().join("synthetic-original.png");
+            std::fs::write(&source_file, b"unchanged synthetic source").unwrap();
+            let child = Command::new("/bin/sh")
+                .args(["-c", "exit 0"])
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let mut owned = Process {
+                group: child.id() as i32,
+                child,
+                stopped: false,
+                workspace: Workspace::new().unwrap(),
+            };
+            let session_path = owned.workspace.path().to_owned();
+            std::os::unix::fs::symlink(&source_file, session_path.join("input.png")).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while owned.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(5));
+            }
+            // Python's ordinary EOF exit does not own this directory: the
+            // supervisor still has to retire the group and clean its workspace.
+            assert!(session_path.exists());
+            owned.force_stop().unwrap();
+            assert!(!session_path.exists());
+            assert_eq!(
+                std::fs::read(source_file).unwrap(),
+                b"unchanged synthetic source"
+            );
+        }
+
+        #[test]
         fn termination_reaps_owned_host_and_descendant_but_not_other_group() {
             let sentinel = Command::new("/bin/sleep")
                 .arg("60")

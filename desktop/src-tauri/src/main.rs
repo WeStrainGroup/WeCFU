@@ -2,6 +2,7 @@
 
 mod exports;
 mod imports;
+mod lifecycle;
 mod manifest;
 mod process;
 mod protocol;
@@ -36,6 +37,8 @@ struct Shared {
     import_chooser: imports::Chooser,
     shutdown: AtomicBool,
     host_done: AtomicBool,
+    event_loop_exiting: AtomicBool,
+    startup_error: Mutex<Option<String>>,
 }
 
 impl Shared {
@@ -52,6 +55,8 @@ impl Shared {
             import_chooser: imports::Chooser::default(),
             shutdown: AtomicBool::new(false),
             host_done: AtomicBool::new(false),
+            event_loop_exiting: AtomicBool::new(false),
+            startup_error: Mutex::new(None),
         }
     }
     fn status(&self, phase: &str, title: &str, message: &str, detail: String) {
@@ -110,6 +115,58 @@ fn request_shutdown(app: &tauri::AppHandle, shared: &Arc<Shared>) {
     }
 }
 
+const QUIT_MENU_ID: &str = "wecfu-quit";
+
+#[cfg(target_os = "macos")]
+fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+    let menu = Menu::default(app)?;
+    let quit_text = PredefinedMenuItem::quit(app, None)?.text()?;
+    let mut matches = Vec::new();
+    for item in menu.items()? {
+        if let MenuItemKind::Submenu(submenu) = item {
+            for (index, item) in submenu.items()?.iter().enumerate() {
+                if let MenuItemKind::Predefined(item) = item {
+                    if item.text()? == quit_text {
+                        matches.push((submenu.clone(), index));
+                    }
+                }
+            }
+        }
+    }
+    if matches.len() != 1 {
+        return Err(std::io::Error::other("Cannot configure the application Quit menu.").into());
+    }
+    let (submenu, index) = matches.pop().unwrap();
+    // The predefined macOS Quit invokes AppKit terminate: directly and bypasses
+    // ExitRequested. Keep the default menu, replacing only that one action.
+    let quit = MenuItem::with_id(app, QUIT_MENU_ID, quit_text, true, Some("CmdOrCtrl+Q"))?;
+    submenu.remove_at(index)?;
+    submenu.insert(&quit, index)?;
+    Ok(menu)
+}
+
+fn finish_supervisor(shared: &Shared, supervisor: &lifecycle::Supervisor) -> Result<(), String> {
+    shared.event_loop_exiting.store(true, Ordering::SeqCst);
+    shared.shutdown.store(true, Ordering::SeqCst);
+    supervisor.finish()
+}
+
+fn finish_exports(shared: &Shared) -> bool {
+    // AppKit may terminate directly after the Exit callback, without returning
+    // from run_return. Clean only our exact export staging paths in either case.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if shared.exports.lock().unwrap().cleanup() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn drain_stderr(mut source: Box<dyn Read + Send>, tail: Arc<Mutex<VecDeque<u8>>>) {
     let mut buffer = [0u8; 2048];
     while let Ok(n) = source.read(&mut buffer) {
@@ -158,7 +215,11 @@ fn run_host(
     root: PathBuf,
     session: &str,
 ) -> Result<(), String> {
-    let resources = manifest::verify(&root, || shared.shutdown.load(Ordering::SeqCst))?;
+    let resources = match manifest::verify(&root, || shared.shutdown.load(Ordering::SeqCst)) {
+        Ok(resources) => resources,
+        Err(_) if shared.shutdown.load(Ordering::SeqCst) => return Ok(()),
+        Err(error) => return Err(error),
+    };
     if shared.shutdown.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -196,6 +257,9 @@ fn run_host(
             }
             break Ok(());
         }
+        if let Some(error) = shared.startup_error.lock().unwrap().take() {
+            break Err(error);
+        }
         if let Some(code) = process.try_wait()? {
             let bytes: Vec<_> = tail.lock().unwrap().iter().copied().collect();
             let detail = String::from_utf8_lossy(&bytes).replace(session, "[session]");
@@ -218,26 +282,47 @@ fn run_host(
             Ok(event) if !ready => {
                 let url = protocol::ready_url(event?, session, &resources.version)?;
                 let origin = url.origin().ascii_serialization();
-                app.add_capability(
-                    tauri::ipc::CapabilityBuilder::new("native-export")
-                        .local(false)
-                        .window("main")
-                        .remote(format!("{origin}/*"))
-                        .permission("allow-desktop-export-prepare")
-                        .permission("allow-desktop-export-arm")
-                        .permission("allow-desktop-export-cancel")
-                        .permission("allow-desktop-export-reveal")
-                        .permission("allow-desktop-choose-import-folder"),
-                )
-                .map_err(|_| "Cannot authorize native application controls.".to_string())?;
-                *shared.origin.lock().unwrap() = Some(origin);
-                let window = app
-                    .get_webview_window("main")
-                    .ok_or("The application window was closed.")?;
-                window
-                    .navigate(url)
-                    .map_err(|_| "Cannot open the local application window.".to_string())?;
-                shared.status("ready", "WeCFU", "Ready", String::new());
+                let ready_app = app.clone();
+                let ready_state = shared.clone();
+                // Never wait for the UI thread from the host supervisor: an OS
+                // termination event may already be waiting for this worker.
+                app.run_on_main_thread(move || {
+                    if ready_state.shutdown.load(Ordering::SeqCst)
+                        || ready_state.event_loop_exiting.load(Ordering::SeqCst)
+                    {
+                        return;
+                    }
+                    let result = (|| -> Result<(), String> {
+                        ready_app
+                            .add_capability(
+                                tauri::ipc::CapabilityBuilder::new("native-export")
+                                    .local(false)
+                                    .window("main")
+                                    .remote(format!("{origin}/*"))
+                                    .permission("allow-desktop-export-prepare")
+                                    .permission("allow-desktop-export-arm")
+                                    .permission("allow-desktop-export-cancel")
+                                    .permission("allow-desktop-export-reveal")
+                                    .permission("allow-desktop-choose-import-folder"),
+                            )
+                            .map_err(|_| {
+                                "Cannot authorize native application controls.".to_string()
+                            })?;
+                        *ready_state.origin.lock().unwrap() = Some(origin);
+                        let window = ready_app
+                            .get_webview_window("main")
+                            .ok_or("The application window was closed.")?;
+                        window
+                            .navigate(url)
+                            .map_err(|_| "Cannot open the local application window.".to_string())?;
+                        ready_state.status("ready", "WeCFU", "Ready", String::new());
+                        Ok(())
+                    })();
+                    if let Err(error) = result {
+                        *ready_state.startup_error.lock().unwrap() = Some(error);
+                    }
+                })
+                .map_err(|_| "Cannot schedule the local application window.".to_string())?;
                 ready = true;
             }
             Ok(Err(error)) => break Err(error),
@@ -283,24 +368,60 @@ fn record_completion(shared: &Shared, session: &str, result: Result<(), String>)
     Completion::None
 }
 
-fn supervise(app: tauri::AppHandle, shared: Arc<Shared>, root: PathBuf) {
+fn supervise(app: tauri::AppHandle, shared: Arc<Shared>, root: PathBuf) -> Result<(), String> {
     // A per-launch capability. It stays in the child pipe/webview, never in logs or saved UI state.
     let session = uuid::Uuid::new_v4().simple().to_string();
     let result = run_host(&app, &shared, root, &session);
-    match record_completion(&shared, &session, result) {
-        Completion::Exit => app.exit(0),
-        Completion::ShowError => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.navigate(asset_url());
-            }
+    let completion = record_completion(&shared, &session, result.clone());
+    let result = result.map_err(|detail| detail.replace(&session, "[session]"));
+    let notify_app = app.clone();
+    // Queue the notification, never synchronously call back into an exiting
+    // event loop. In particular AppHandle::exit can force process::exit if its
+    // runtime has already gone away, interrupting the main thread's cleanup.
+    let _ = app.run_on_main_thread(move || {
+        if shared.event_loop_exiting.load(Ordering::SeqCst) {
+            return;
         }
-        Completion::None => (),
-    }
+        match completion {
+            Completion::Exit => notify_app.exit(0),
+            Completion::ShowError => {
+                if let Some(window) = notify_app.get_webview_window("main") {
+                    let _ = window.navigate(asset_url());
+                }
+            }
+            Completion::None => (),
+        }
+    });
+    result
 }
 
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    #[test]
+    fn terminal_exit_signals_shutdown_before_joining_the_worker() {
+        let shared = Arc::new(Shared::new());
+        let supervisor = lifecycle::Supervisor::default();
+        let worker_state = shared.clone();
+        supervisor.start(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !worker_state.shutdown.load(Ordering::SeqCst) {
+                if Instant::now() >= deadline {
+                    return Err("exit did not signal the host".into());
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(worker_state.event_loop_exiting.load(Ordering::SeqCst));
+            // Simulate the real cleanup path taking a Shared lock; join must
+            // not hold any lock the supervisor needs in order to finish.
+            worker_state.status("stopped", "WeCFU", "Stopped", String::new());
+            Ok(())
+        });
+        assert_eq!(finish_supervisor(&shared, &supervisor), Ok(()));
+        assert_eq!(shared.status.lock().unwrap().phase, "stopped");
+        assert_eq!(finish_supervisor(&shared, &supervisor), Ok(()));
+    }
+
     #[test]
     fn cleanup_failure_remains_visible_instead_of_successful_exit() {
         let shared = Shared::new();
@@ -337,8 +458,19 @@ mod lifecycle_tests {
 fn main() {
     let shared = Arc::new(Shared::new());
     let setup_state = shared.clone();
-    let app = tauri::Builder::default()
+    let supervisor = Arc::new(lifecycle::Supervisor::default());
+    let setup_supervisor = supervisor.clone();
+    let menu_state = shared.clone();
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(macos_menu);
+    let app = builder
         .manage(shared.clone())
+        .on_menu_event(move |app, event| {
+            if event.id().as_ref() == QUIT_MENU_ID {
+                request_shutdown(app, &menu_state);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             boot_status,
             exports::desktop_export_prepare,
@@ -429,34 +561,35 @@ fn main() {
                 .unwrap_or(resources);
             let handle = app.handle().clone();
             let state = setup_state.clone();
-            thread::spawn(move || supervise(handle, state, resources));
+            setup_supervisor.start(move || supervise(handle, state, resources));
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("Unable to construct the WeCFU desktop window");
     let after_exit = shared.clone();
+    let exit_supervisor = supervisor.clone();
     let code = app.run_return(move |handle, event| {
         if let RunEvent::ExitRequested { api, .. } = event {
             if !shared.host_done.load(Ordering::SeqCst) {
                 api.prevent_exit();
                 request_shutdown(handle, &shared);
             }
+        } else if let RunEvent::Exit = event {
+            // AppKit termination (for example Dock > Quit) can skip the
+            // cancellable request. Cleanup must finish before this callback
+            // returns to the OS; the supervisor never waits for UI callbacks.
+            if let Err(error) = finish_supervisor(&shared, &exit_supervisor) {
+                eprintln!("{error}");
+            }
+            if !finish_exports(&shared) {
+                eprintln!("An incomplete export could not be removed.");
+            }
         }
     });
-    // run_return consumes the runtime. Retry only our exact staging paths after
-    // the event loop returns; a failed cleanup must not turn into a successful save.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let clean = loop {
-        if after_exit.exports.lock().unwrap().cleanup() {
-            break true;
-        }
-        if Instant::now() >= deadline {
-            break false;
-        }
-        thread::sleep(Duration::from_millis(50));
-    };
+    let host_clean = finish_supervisor(&after_exit, &supervisor).is_ok();
+    let clean = finish_exports(&after_exit);
     if !clean {
         eprintln!("An incomplete export could not be removed.");
     }
-    std::process::exit(if clean { code } else { 1 });
+    std::process::exit(if clean && host_clean { code } else { 1 });
 }
