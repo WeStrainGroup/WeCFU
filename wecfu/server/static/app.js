@@ -384,7 +384,7 @@ function updateControls() {
   $('mode-select').disabled = locked || restrictedReview();
   for (const id of [...Object.values(PARAM_IDS), ...Object.values(paramControls.SPECS).map(spec => `s-${spec.id}`), 'preset-select', 'p-radius', 'p-preview', 'btn-defaults']) $(id).disabled = locked;
   for (const id of ['btn-add-images', 'btn-ingest', 'btn-choose-folder', 'path-input']) $(id).disabled = locked;
-  $('btn-choose-folder').hidden = !desktopImportMode() || reviewMode() || Boolean(state.config?.web_mode);
+  $('btn-choose-folder').hidden = reviewMode() || !(nativeFolderImport() || browserFolderImport());
   $('path-input').placeholder = window.__WECFU_DESKTOP_PLATFORM__ === 'windows' ? 'C:\\Photos' : '/path/to/photos';
   $('btn-run').disabled = locked || !state.imageList.length || $('mode-select').value === 'manual' || modelMethod();
   $('p-preview').disabled = locked;
@@ -1753,8 +1753,15 @@ async function countCustomBatch() {
 }
 
 function desktopImportMode() { return window.__WECFU_DESKTOP_IMPORT__ === true; }
+function nativeFolderImport() { return desktopImportMode() && !state.config?.web_mode; }
+function browserFolderImport() { return 'webkitdirectory' in $('folder-input'); }
 async function chooseImportFolder() {
-  if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending() || state.config?.web_mode) return;
+  if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
+  if (!nativeFolderImport()) {
+    if (!browserFolderImport()) throw new Error(t('chooseFolderUnavailable'));
+    $('folder-input').click();
+    return;
+  }
   const invoke = window.__TAURI__?.core?.invoke;
   if (!desktopImportMode() || typeof invoke !== 'function') throw new Error(t('chooseFolderUnavailable'));
   let path;
@@ -1770,8 +1777,13 @@ async function chooseImportFolder() {
   $('path-input').value = path;
   await ingestPath(path);
 }
+async function uploadFolderSelection(input) {
+  try {
+    if (input.files?.length) await uploadFiles(input.files);
+  } finally { input.value = ''; }
+}
 async function ingestPath(path) {
-  if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending()) return;
+  if (pendingConfirmation || reviewMode() || state.busy || state.loading || state.crop || applyPending() || state.config?.web_mode) return;
   clearModelPreview();
   state.busy = true; updateControls(); setStatus(t('statusIngesting'));
   try {
@@ -2140,6 +2152,7 @@ function wireUpHandlers() {
     return result;
   }));
   $('file-input').addEventListener('change', safeAction(event => uploadFiles(event.target.files)));
+  $('folder-input').addEventListener('change', safeAction(event => uploadFolderSelection(event.target)));
   $('mode-select').addEventListener('change', event => { changeMode(); focusAfterSelect(event.currentTarget || $('mode-select')); });
   $('method-select').addEventListener('change', event => { changeMethod(); focusAfterSelect(event.currentTarget || $('method-select')); });
   $('reference-panel').addEventListener('toggle', safeAction(() => {

@@ -1730,7 +1730,7 @@ test('custom batch binds fresh source bytes and never draws result on a stale di
 
 // Desktop export acceptance uses only a synthetic response and mocked native
 // boundary; actual filesystem/native-dialog acceptance is performed on the app.
-function exportFixture({native = true, locale = 'en', prepare = {id: 'export-1', path: '/Users/test/成果 & <1>.csv'}, failAt} = {}) {
+function exportFixture({native = true, locale = 'en', prepare = {id: 'export-1', path: '/synthetic/成果 & <1>.csv'}, failAt} = {}) {
   const view = ui(locale), commands = [], downloads = [], timers = new Map();
   let nextTimer = 0;
   view.context.setTimeout = (fn, ms) => { const id = ++nextTimer; timers.set(id, {fn, ms}); return id; };
@@ -1799,7 +1799,7 @@ for (const failAt of ['desktop_export_prepare', 'fetch', 'desktop_export_arm']) 
 for (const locale of ['en', 'zh-CN', 'fr', 'ru']) {
   test(`desktop ${locale} shows exact saved path and reveal only after native completion`, async () => {
     const v = exportFixture({locale});
-    const path = '/Users/test/成果 & <1>.csv';
+    const path = '/synthetic/成果 & <1>.csv';
     const pending = v.run('doExport()');
     await exportDownloaded(v);
     assert.equal(v.element('export-receipt').hidden, true);
@@ -1873,7 +1873,7 @@ test('desktop native save ignores any stale browser folder handle', async () => 
   v.run('state.saveDirHandle = forbiddenFolder');
   const pending = v.run('doExport()');
   await exportDownloaded(v);
-  v.complete({id: 'export-1', status: 'saved', path: '/Users/test/成果 & <1>.csv'});
+  v.complete({id: 'export-1', status: 'saved', path: '/synthetic/成果 & <1>.csv'});
   await pending;
   assert.equal(v.element('status').textContent, 'Export saved');
 });
@@ -1901,7 +1901,7 @@ test('browser chosen-folder flow closes the writable before reporting saved', as
 test('reveal failure retains the successful path for manual finding', async () => {
   const v = exportFixture({failAt: 'desktop_export_reveal'}), pending = v.run('doExport()');
   await exportDownloaded(v);
-  const path = '/Users/test/成果 & <1>.csv';
+  const path = '/synthetic/成果 & <1>.csv';
   v.complete({id: 'export-1', status: 'saved', path});
   await pending;
   await assert.rejects(v.run('revealDesktopExport()'), /folder could not be opened/);
@@ -1925,6 +1925,8 @@ for (const locale of ['en', 'zh-CN', 'fr', 'ru']) {
   test(`native folder selection imports the chosen path once (${locale})`, async () => {
     const v = ui(locale), nativeCalls = [];
     const selected = String.raw`C:\用户资料\photo set\папка`;
+    v.element('folder-input').webkitdirectory = true;
+    v.element('folder-input').click = () => { throw new Error('desktop must use its native picker'); };
     v.window.__WECFU_DESKTOP_IMPORT__ = true;
     v.window.__WECFU_DESKTOP_PLATFORM__ = 'windows';
     v.window.__TAURI__ = {core: {invoke: async (command, args) => {
@@ -1971,11 +1973,11 @@ test('a failed or invalid native folder selection never imports and releases bus
   }
 });
 
-test('folder import stays unavailable in browsers, hosted sessions, review queues and locked workflows', async () => {
+test('unsupported browsers hide folder selection; review queues and locked workflows cannot open a picker', async () => {
   const browser = ui(); browser.run('updateControls()');
   assert.equal(browser.element('btn-choose-folder').hidden, true);
   await assert.rejects(browser.run('chooseImportFolder()'), /chooseFolderUnavailable/);
-  for (const setup of ["state.config.web_mode=true", "state.busy=true", "state.loading=true", "state.crop={}", "reviewMode=()=>true"]) {
+  for (const setup of ["state.busy=true", "state.loading=true", "state.crop={}", "reviewMode=()=>true", "pendingConfirmation={}", "applyPending=()=>true"]) {
     const v = ui(); let invoked = false;
     v.window.__WECFU_DESKTOP_IMPORT__ = true;
     v.window.__TAURI__ = {core:{invoke: async () => {invoked = true; return '/forbidden';}}};
@@ -1984,6 +1986,112 @@ test('folder import stays unavailable in browsers, hosted sessions, review queue
     assert.equal(invoked, false, setup);
     assert.equal(v.run('calls.length'), 0);
   }
+});
+
+function browserFolderFixture({webMode = false, status = 200} = {}) {
+  const v = ui(), input = v.element('folder-input'), uploads = [];
+  input.webkitdirectory = true;
+  input.click = () => { input.clicks = (input.clicks || 0) + 1; };
+  v.context.FormData = class { constructor() { this.entries = []; } append(key, value) { this.entries.push([key, value]); } };
+  v.context.XMLHttpRequest = class {
+    constructor() {
+      this.upload = {addEventListener() {}}; this.status = status;
+      this.responseText = JSON.stringify(status === 200 ? {batch:'synthetic'} : {detail:'upload_limit'});
+    }
+    open(method, url) { this.method = method; this.url = url; }
+    send(data) {
+      uploads.push({method:this.method, url:this.url, entries:data.entries});
+      if (status === 0) this.onerror(); else this.onload();
+    }
+  };
+  v.run(`state.config.web_mode=${webMode}; updateControls();`);
+  return {...v, input, uploads};
+}
+
+for (const webMode of [false, true]) {
+  test(`folder picker uploads filtered files and supports selecting the same folder again (${webMode ? 'hosted' : 'local browser'})`, async () => {
+    const v = browserFolderFixture({webMode});
+    const before = plain(v.run('snapshot()'));
+    assert.equal(v.element('btn-choose-folder').hidden, false);
+    await v.element('btn-choose-folder').fire('click');
+    assert.equal(v.input.clicks, 1);
+    assert.equal(v.uploads.length, 0);
+    assert.equal(v.run('calls.length'), 0);
+    const selected = [{name:'photo.png', webkitRelativePath:'set/photo.png'},
+      {name:'photo.png', webkitRelativePath:'set/sub/photo.png'},
+      {name:'nested.TIFF', webkitRelativePath:'set/sub/nested.TIFF'},
+      {name:'skip.txt', webkitRelativePath:'set/skip.txt'}];
+    for (let repeat = 0; repeat < 2; repeat++) {
+      v.input.files = selected; v.input.value = 'browser selection';
+      await v.input.fire('change');
+      assert.equal(v.input.value, '', 'clear the selection for another import of the same folder');
+      assert.equal(v.run('state.busy'), false);
+    }
+    assert.equal(v.uploads.length, 2);
+    for (const upload of v.uploads) assert.deepEqual(plain(upload), {
+      method:'POST', url:'/api/upload', entries:[['batch','synthetic'],['view','unknown'],
+        ['files',selected[0]],['files',selected[1]],['files',selected[2]]]
+    });
+    assert.equal(v.run('calls.length'), 0, 'no path import or recognition request');
+    assert.equal(v.run('saves.length'), 0);
+    assert.deepEqual(plain(v.run('snapshot()')), before);
+    assert.equal(v.errors.length, 0);
+  });
+}
+
+test('canceling browser folder selection does not upload or change work', async () => {
+  const v = browserFolderFixture({webMode:true}), before = plain(v.run('snapshot()'));
+  await v.element('btn-choose-folder').fire('click');
+  v.input.files = []; v.input.value = 'canceled';
+  await v.input.fire('change');
+  assert.equal(v.input.value, '');
+  assert.equal(v.uploads.length, 0);
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.errors.length, 0);
+  assert.deepEqual(plain(v.run('snapshot()')), before);
+});
+
+test('failed or empty image selection clears the browser folder input without recognizing photos', async () => {
+  for (const [status, files, expectedUploads] of [[413,[{name:'photo.png'}],1], [0,[{name:'photo.png'}],1], [200,[{name:'skip.txt'}],0]]) {
+    const v = browserFolderFixture({webMode:true, status});
+    v.input.files = files; v.input.value = 'browser selection';
+    await v.input.fire('change');
+    assert.equal(v.input.value, '');
+    assert.equal(v.uploads.length, expectedUploads);
+    assert.equal(v.run('state.busy'), false);
+    assert.equal(v.run('calls.length'), 0);
+    assert.equal(v.errors.length, 1);
+  }
+});
+
+test('hosted sessions use file upload even with desktop flags and never submit absolute paths', async () => {
+  const v = browserFolderFixture({webMode:true});
+  v.window.__WECFU_DESKTOP_IMPORT__ = true;
+  v.window.__TAURI__ = {core:{invoke: async () => { throw new Error('hosted page cannot invoke native import'); }}};
+  await v.element('btn-choose-folder').fire('click');
+  assert.equal(v.input.clicks, 1);
+  await v.run("ingestPath('/synthetic/forbidden')");
+  assert.equal(v.run('calls.length'), 0);
+  assert.equal(v.errors.length, 0);
+});
+
+test('browser folder selection respects workflow locks even when a change arrives after the picker opens', async () => {
+  for (const setup of ["state.busy=true", "state.loading=true", "state.crop={}", "reviewMode=()=>true", "pendingConfirmation={}", "applyPending=()=>true"]) {
+    const v = browserFolderFixture({webMode:true});
+    v.run(`${setup}; updateControls();`);
+    await v.element('btn-choose-folder').fire('click');
+    assert.equal(v.input.clicks, undefined, setup);
+    v.input.files = [{name:'photo.png'}]; v.input.value = 'browser selection';
+    await v.input.fire('change');
+    assert.equal(v.input.value, '');
+    assert.equal(v.uploads.length, 0, setup);
+    assert.equal(v.run('calls.length'), 0, setup);
+  }
+});
+
+test('folder upload markup uses a hidden multi-file directory picker with the supported extensions', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../wecfu/server/static/index.html'), 'utf8');
+  assert.match(html, /<input id="folder-input" type="file" accept="\.jpg,\.jpeg,\.png,\.tif,\.tiff" multiple webkitdirectory hidden/);
 });
 
 test('switching language retains the photo identity and translates the existing batch report without replacing current status', async () => {
