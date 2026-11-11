@@ -39,14 +39,20 @@ jobs:
           $env:WECFU_TEST_PYTHON = (Get-Command python).Source
           cargo +stable test --manifest-path desktop/src-tauri/Cargo.toml --locked
       - name: Prepare acceptance driver
-        run: python -m pip install pytest numpy pillow
+        run: |
+          # Exercise the real desktop startup/config route with a synthetic
+          # provider. Install app dependencies only; model runtime stays bundled.
+          $requirements = @(python -c "from tools.build_desktop_resources import APP_REQUIREMENTS; print('\n'.join(APP_REQUIREMENTS))")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest httpx . @requirements
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify native export frontend and installed-shell acceptance contracts
         run: |
           $tests = @(Get-ChildItem tests/*.test.cjs -File | Sort-Object Name | ForEach-Object { $_.FullName })
           if ($tests.Count -eq 0) { throw "Missing frontend tests" }
           node --test @tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q tests/test_windows_installer_acceptance.py tests/test_windows_shell_smoke.py --junitxml=desktop-acceptance/acceptance-contracts.xml
+          python -m pytest -q tests/test_windows_installer_acceptance.py tests/test_windows_shell_smoke.py tests/test_desktop_host.py --junitxml=desktop-acceptance/acceptance-contracts.xml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify native backend transport and shutdown
         run: python tools/desktop_acceptance.py --transport-only --output desktop-acceptance/transport

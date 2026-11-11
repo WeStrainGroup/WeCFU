@@ -9,20 +9,25 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+from http.client import HTTPConnection, HTTPException
 from http.cookiejar import CookieJar
 import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
+import threading
 import time
-from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler, Request, build_opener
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 TOTAL_SECONDS = 180
 START_SECONDS = 120
 HTTP_SECONDS = 30
+CONFIG_SECONDS = 8
+FRONTEND = 'app/wecfu/server/static/app.js'
 # The old 15-second whole-PowerShell limit expired before it could return any
 # snapshot on CI. Measure cold process/CIM/TCP phases within the existing startup
 # budget; this changes neither the 120-second startup nor 180-second total cap.
@@ -257,35 +262,155 @@ class NoRedirect(HTTPRedirectHandler):
         raise SmokeFailure('Installed service unexpectedly redirected a request')
 
 
-def check_http(capability, deadline):
+def frontend_config_contract(bundle, manifest):
+    """Bind the config deadline to the exact installed, manifest-pinned UI."""
+    source = bundle / FRONTEND
+    require(source.is_file() and source.stat().st_size <= MAX_RESPONSE,
+            'Installed frontend source is absent or exceeds its size budget')
+    raw = source.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    require(manifest.get('files', {}).get(FRONTEND) == digest,
+            'Installed frontend source differs from the verified manifest')
+    functions = re.findall(rb'async function readServerConfig\(\) \{(.*?)\n\}', raw, re.DOTALL)
+    require(len(functions) == 1 and functions[0].count(b"request('/api/config'") == 1,
+            'Installed frontend config deadline cannot be identified')
+    timers = re.findall(rb'setTimeout\(\(\) => controller\.abort\(\), ([0-9]+)\)', functions[0])
+    require(timers == [str(CONFIG_SECONDS * 1000).encode('ascii')],
+            'Installed frontend config deadline differs from the acceptance contract')
+    return {'source': FRONTEND, 'sha256': digest, 'timeout_seconds': CONFIG_SECONDS}
+
+
+class HttpDeadline:
+    """Interrupt only this GET's sockets at an absolute deadline, including body reads.
+
+    urllib's timeout is per socket operation, so headers followed by a slow body
+    must not each receive a fresh full budget. No retries or extra requests occur.
+    """
+    def __init__(self, deadline):
+        self.deadline = deadline
+        self.lock = threading.Lock()
+        self.sockets = []
+        self.expired = False
+        self.timer = None
+
+    def __enter__(self):
+        self.timer = threading.Timer(remaining(self.deadline, HTTP_SECONDS), self.expire)
+        self.timer.daemon = True
+        self.timer.start()
+        return self
+
+    @staticmethod
+    def shutdown(sock):
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # Already closed by urllib; never affect any other socket.
+
+    def expire(self):
+        with self.lock:
+            self.expired = True
+            sockets = list(self.sockets)
+        for sock in sockets:
+            self.shutdown(sock)
+
+    def watch(self, sock):
+        with self.lock:
+            expired = self.expired or time.monotonic() >= self.deadline
+            if not expired:
+                self.sockets.append(sock)
+        if expired:
+            self.shutdown(sock)
+            raise TimeoutError()
+
+    def check(self):
+        if self.expired or time.monotonic() >= self.deadline:
+            raise TimeoutError()
+
+    def handler(self):
+        budget = self
+        class Connection(HTTPConnection):
+            def connect(self):
+                super().connect()
+                budget.watch(self.sock)
+        class Handler(HTTPHandler):
+            def http_open(self, request):
+                return self.do_open(Connection, request)
+        return Handler()
+
+    def __exit__(self, *unused):
+        self.timer.cancel()
+        self.timer.join()  # Callback only shuts down our <=1 local GET socket.
+        self.sockets.clear()
+
+
+def check_http(capability, deadline, *, diagnostics=None, readiness_deadline=None):
     origin, session = capability['origin'], capability['session']
-    opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()), NoRedirect())
-    records = []
+    cookies = CookieJar()
+    records = [] if diagnostics is None else diagnostics
+    started = time.monotonic()
     for label, route, expected in [('unauthorized_batches', '/api/batches', 403),
                                    ('session_bootstrap', '/?desktop_session=' + session, 200),
                                    ('empty_batches', '/api/batches', 200), ('ultra_available', '/api/config', 200)]:
-        request = Request(origin + route, headers={'Origin': origin}, method='GET')
         before = time.monotonic()
+        request_deadline, constraint = deadline, 'shared_http_budget'
+        if label == 'unauthorized_batches' and readiness_deadline is not None and readiness_deadline < request_deadline:
+            request_deadline, constraint = readiness_deadline, 'startup_budget'
+        if label == 'ultra_available' and before + CONFIG_SECONDS < request_deadline:
+            request_deadline, constraint = before + CONFIG_SECONDS, 'frontend_config_budget'
+        row = {'check': label, 'state': 'started', 'phase': 'opening_response',
+               'timeout_constraint': constraint, 'timeout_seconds': max(0, request_deadline - before)}
+        # Append before I/O so failures retain completed checks and the exact
+        # current allowlisted check/phase. Never save routes, headers or bodies.
+        records.append(row)
         try:
-            response = opener.open(request, timeout=remaining(deadline, 10))
-        except HTTPError as error:
-            response = error
-        with response:
-            raw = response.read(MAX_RESPONSE + 1)
-            require(response.status == expected and len(raw) <= MAX_RESPONSE,
-                    'Installed service returned an unexpected HTTP response')
-        if label in ('empty_batches', 'ultra_available'):
-            try:
-                body = json.loads(raw)
-            except ValueError:
-                raise SmokeFailure('Installed service returned invalid configuration JSON') from None
-            if label == 'empty_batches':
-                require(body.get('batches') == [], 'Installed shell did not start with an empty workspace')
-            else:
-                require(body.get('default_model') == ENGINE
-                        and body.get('models', {}).get('sam2', {}).get('available') is True,
-                        'Ultra is unavailable from the actual installed shell')
-        records.append({'check': label, 'status': expected, 'seconds': time.monotonic() - before})
+            with HttpDeadline(request_deadline) as budget:
+                opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(cookies), NoRedirect(), budget.handler())
+                request = Request(origin + route, headers={'Origin': origin}, method='GET')
+                try:
+                    response = opener.open(request, timeout=remaining(request_deadline, HTTP_SECONDS))
+                except HTTPError as error:
+                    response = error
+                with response:
+                    budget.check()
+                    require(type(response.status) is int and 100 <= response.status <= 599,
+                            'Installed service returned an invalid HTTP status')
+                    row['status'] = response.status
+                    row['phase'] = 'reading_body'
+                    raw = response.read(MAX_RESPONSE + 1)
+                    budget.check()
+                    row['phase'] = 'validating'
+                    require(response.status == expected and len(raw) <= MAX_RESPONSE,
+                            'Installed service returned an unexpected HTTP response')
+                if label in ('empty_batches', 'ultra_available'):
+                    try:
+                        body = json.loads(raw)
+                    except ValueError:
+                        raise SmokeFailure('Installed service returned invalid configuration JSON') from None
+                    require(type(body) is dict, 'Installed service returned invalid configuration JSON')
+                    if label == 'empty_batches':
+                        require(body.get('batches') == [], 'Installed shell did not start with an empty workspace')
+                    else:
+                        require(body.get('default_model') == ENGINE
+                                and type(body.get('models')) is dict
+                                and type(body['models'].get('sam2')) is dict
+                                and body['models']['sam2'].get('available') is True,
+                                'Ultra is unavailable from the actual installed shell')
+                budget.check()
+                row.update(state='completed', phase='completed')
+        except Exception as error:
+            timed_out = (time.monotonic() >= request_deadline or isinstance(error, TimeoutError)
+                         or (isinstance(error, URLError) and isinstance(error.reason, TimeoutError)))
+            row['state'] = 'timeout' if timed_out else 'failed'
+            if timed_out:
+                row['error_category'] = 'deadline'
+                raise SmokeFailure('Installed HTTP check timed out: ' + label + ' during ' + row['phase']) from None
+            row['error_category'] = ('validation' if isinstance(error, SmokeFailure) else
+                                     'network' if isinstance(error, (OSError, URLError, HTTPException)) else 'unexpected')
+            # urllib exceptions may contain the bootstrap URL/cookie capability.
+            raise SmokeFailure('Installed HTTP check failed: ' + label + ' during ' + row['phase']) from None
+        finally:
+            row['seconds'] = time.monotonic() - before
+            row['finished_after_seconds'] = time.monotonic() - started
     return records
 
 
@@ -306,6 +431,7 @@ def run(installed, bundle, manifest, output, expected_exe_sha256, outer_deadline
         require(sys.platform == 'win32', 'Installed native shell smoke is Windows-only')
         require(installed.is_file() and sha(installed) == expected_exe_sha256, 'Installed EXE differs before native startup')
         manifest_sha = sha(bundle / 'bundle-manifest.json')
+        record['frontend_config_contract'] = frontend_config_contract(bundle, manifest)
         record.update(installed_exe=str(installed), installed_exe_sha256=expected_exe_sha256,
                       manifest_sha256=manifest_sha, app_version=manifest['app_version'])
         temp_root = output / 'session-temp'; temp_root.mkdir()
@@ -344,10 +470,18 @@ def run(installed, bundle, manifest, output, expected_exe_sha256, outer_deadline
                     break
             time.sleep(min(0.5, remaining(startup_deadline, 0.5)))
         require(capability is not None, 'Installed shell did not become ready within 120 seconds')
-        record['ready_seconds'] = time.monotonic() - started
+        record['tcp_listener_observed_seconds'] = time.monotonic() - started
         record['identity'] = capability['identity']
         record['phase'] = 'authenticated_http_checks'
-        record['http_checks'] = check_http(capability, min(time.monotonic() + HTTP_SECONDS, deadline - 5))
+        record['http_checks'] = []
+        http_started_seconds = time.monotonic() - started
+        try:
+            check_http(capability, min(time.monotonic() + HTTP_SECONDS, deadline - 5),
+                       diagnostics=record['http_checks'], readiness_deadline=startup_deadline)
+        finally:
+            if record['http_checks'] and record['http_checks'][0]['state'] == 'completed':
+                record['ready_seconds'] = http_started_seconds + record['http_checks'][0]['finished_after_seconds']
+                record['readiness'] = 'Owned loopback host returned the required unauthenticated HTTP 403 within the startup deadline'
         require(process.poll() is None, 'Installed shell exited during HTTP checks')
         record['phase'] = 'metadata_identity_recheck'
         after = validate_snapshot(read_metadata(metadata, shell_pid, process.pid, deadline - 5,

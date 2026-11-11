@@ -1,12 +1,15 @@
 """Synthetic metadata/HTTP/ownership checks; never launch a GUI or model here."""
 from copy import deepcopy
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
+from urllib.error import URLError
 
 import pytest
 
@@ -21,10 +24,14 @@ def fixture(tmp_path):
     installed.parent.mkdir(); installed.write_bytes(b'fixed synthetic EXE')
     bundle = installed.parent/'bundle'; bundle.mkdir()
     manifest = {'python': 'runtime/python.exe', 'entrypoint': 'app/desktop_entry.py', 'app_version': 'synthetic'}
-    (bundle/'bundle-manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
     for name in (manifest['python'], manifest['entrypoint']):
         target = bundle/name; target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b'synthetic existing resource')
+    frontend = bundle/smoke.FRONTEND; frontend.parent.mkdir(parents=True)
+    source = Path(smoke.__file__).resolve().parents[1]/'wecfu/server/static/app.js'
+    frontend.write_bytes(source.read_bytes())
+    manifest['files'] = {smoke.FRONTEND: smoke.sha(frontend)}
+    (bundle/'bundle-manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
     temp = tmp_path/'test-temp'; temp.mkdir()
     workspace = temp/('wecfu-desktop-session-' + 'b'*32); workspace.mkdir()
     moment = int(time.time()*1000)
@@ -268,19 +275,154 @@ def test_http_is_read_only_bounded_and_receipt_never_contains_session(tmp_path, 
     if mutation == 'oversize': payloads[1] = Response(200, b'x'*(smoke.MAX_RESPONSE+1))
     seen = []
     def request(req, timeout):
-        assert req.get_method() == 'GET' and req.data is None and 0 < timeout <= 10
+        assert req.get_method() == 'GET' and req.data is None and 0 < timeout <= smoke.HTTP_SECONDS
+        if req.full_url.endswith('/api/config'): assert timeout <= smoke.CONFIG_SECONDS
         assert req.get_header('Origin') == 'http://127.0.0.1:54321'
         seen.append(req.full_url)
         return payloads[len(seen)-1]
     monkeypatch.setattr(smoke, 'build_opener', lambda *args: SimpleNamespace(open=request))
-    call = lambda: smoke.check_http({'origin':'http://127.0.0.1:54321', 'session': TOKEN}, time.monotonic()+30)
+    diagnostics = []
+    call = lambda: smoke.check_http({'origin':'http://127.0.0.1:54321', 'session': TOKEN}, time.monotonic()+30,
+                                  diagnostics=diagnostics)
     if mutation != 'none':
         with pytest.raises(smoke.SmokeFailure): call()
+        assert diagnostics[-1]['state'] == 'failed'
+        assert diagnostics[-1]['phase'] == 'validating'
+        assert all(row['state'] == 'completed' for row in diagnostics[:-1])
     else:
         result = call()
+        assert result is diagnostics
         assert len(result) == 4 and TOKEN not in json.dumps(result)
         assert [r['check'] for r in result] == ['unauthorized_batches','session_bootstrap','empty_batches','ultra_available']
         assert all('/model' not in url for url in seen)
+    assert TOKEN not in json.dumps(diagnostics) and 'desktop_session' not in json.dumps(diagnostics)
+
+
+@pytest.mark.parametrize('mutation', ['none', 'changed_bytes', 'unpinned', 'different_deadline', 'duplicate_deadline', 'missing_function'])
+def test_frontend_config_deadline_is_bound_to_verified_installed_source(tmp_path, mutation):
+    _, kwargs, _ = fixture(tmp_path)
+    source = kwargs['bundle']/smoke.FRONTEND
+    if mutation == 'changed_bytes': source.write_bytes(source.read_bytes()+b'\n')
+    if mutation == 'unpinned': kwargs['manifest']['files'].clear()
+    if mutation in ('different_deadline', 'duplicate_deadline', 'missing_function'):
+        raw = source.read_bytes()
+        if mutation == 'different_deadline': raw = raw.replace(b'controller.abort(), 8000', b'controller.abort(), 9000')
+        if mutation == 'duplicate_deadline': raw = raw.replace(b'const timer = setTimeout(() => controller.abort(), 8000);',
+            b'const timer = setTimeout(() => controller.abort(), 8000);setTimeout(() => controller.abort(), 8000);')
+        if mutation == 'missing_function': raw = raw.replace(b'async function readServerConfig()', b'async function unknownConfig()')
+        source.write_bytes(raw)
+        kwargs['manifest']['files'][smoke.FRONTEND] = smoke.sha(source)
+    if mutation == 'none':
+        result = smoke.frontend_config_contract(kwargs['bundle'], kwargs['manifest'])
+        assert result == {'source': smoke.FRONTEND, 'sha256': smoke.sha(source), 'timeout_seconds': 8}
+    else:
+        with pytest.raises(smoke.SmokeFailure): smoke.frontend_config_contract(kwargs['bundle'], kwargs['manifest'])
+
+
+@pytest.mark.parametrize('failure', ['headers_timeout', 'body_timeout', 'network', 'invalid_json'])
+def test_http_failures_preserve_partial_progress_and_redact_sensitive_exceptions(monkeypatch, failure):
+    calls = []
+    def request(req, timeout):
+        calls.append(req.full_url)
+        if len(calls) == 1: return Response(403, b'denied')
+        if failure == 'headers_timeout': raise TimeoutError('private '+TOKEN)
+        if failure == 'network': raise URLError('private '+req.full_url)
+        if failure == 'body_timeout':
+            response = Response(200, b'')
+            def read(size): raise TimeoutError('private '+TOKEN)
+            response.read = read
+            return response
+        if len(calls) == 2: return Response(200, b'html')
+        return Response(200, TOKEN.encode())
+    monkeypatch.setattr(smoke, 'build_opener', lambda *args: SimpleNamespace(open=request))
+    rows = []
+    with pytest.raises(smoke.SmokeFailure) as failure_info:
+        smoke.check_http({'origin':'http://127.0.0.1:54321', 'session':TOKEN}, time.monotonic()+30, diagnostics=rows)
+    assert rows[0]['state'] == 'completed' and rows[0]['status'] == 403
+    assert rows[-1]['check'] == ('empty_batches' if failure == 'invalid_json' else 'session_bootstrap')
+    assert rows[-1]['phase'] == {'headers_timeout':'opening_response', 'body_timeout':'reading_body',
+                                'network':'opening_response', 'invalid_json':'validating'}[failure]
+    assert rows[-1]['state'] == ('timeout' if 'timeout' in failure else 'failed')
+    assert rows[-1]['seconds'] >= 0
+    serialized = json.dumps(rows) + str(failure_info.value)
+    assert TOKEN not in serialized and 'desktop_session' not in serialized and '127.0.0.1' not in serialized
+
+
+@pytest.mark.parametrize('scenario', ['delayed_listen_to_http', 'config_headers_timeout', 'config_body_timeout',
+                                    'startup_timeout', 'shared_http_timeout', 'headers_plus_body_timeout'])
+def test_real_loopback_http_readiness_deadlines_and_cookie_contract(monkeypatch, scenario, record_property):
+    """Synthetic HTTP only: no UI, photos, installed app, runtime probe or model."""
+    monkeypatch.setattr(smoke, 'CONFIG_SECONDS', .6)
+    received = []
+    serving_delay = .3 if scenario == 'delayed_listen_to_http' else .9 if scenario == 'startup_timeout' else 0
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args): pass  # Never log private bootstrap URL.
+        def do_GET(self):
+            assert self.headers['Origin'] == origin
+            authorized = self.headers.get('Cookie') == 'session='+TOKEN
+            bootstrap = self.path == '/?desktop_session='+TOKEN
+            if self.path == '/api/batches': label = 'empty_batches' if authorized else 'unauthorized_batches'
+            elif bootstrap: label = 'session_bootstrap'
+            else:
+                assert self.path == '/api/config' and authorized
+                label = 'ultra_available'
+            received.append(label)
+            header_delay = body_delay = 0
+            if scenario == 'config_headers_timeout' and label == 'ultra_available': header_delay = .9
+            if scenario == 'config_body_timeout' and label == 'ultra_available': body_delay = .9
+            if scenario == 'shared_http_timeout' and label in ('session_bootstrap', 'empty_batches'): header_delay = .4
+            if scenario == 'headers_plus_body_timeout' and label == 'ultra_available': header_delay, body_delay = .35, .45
+            if header_delay: time.sleep(header_delay)
+            payload = {'unauthorized_batches': b'denied', 'session_bootstrap': b'<html>synthetic</html>',
+                       'empty_batches': b'{"batches":[]}',
+                       'ultra_available': b'{"default_model":"sam2_local_v1","models":{"sam2":{"available":true}}}'}[label]
+            try:
+                self.send_response(403 if label == 'unauthorized_batches' else 200)
+                self.send_header('Content-Length', str(len(payload)))
+                if bootstrap: self.send_header('Set-Cookie', 'session='+TOKEN+'; Path=/; HttpOnly; SameSite=Strict')
+                self.end_headers()
+                self.wfile.write(payload[:1]); self.wfile.flush()
+                if body_delay: time.sleep(body_delay)
+                self.wfile.write(payload[1:]); self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass  # Expected when this test's bounded client retires its socket.
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.daemon_threads = False  # server_close joins delayed synthetic handlers too.
+    origin = 'http://127.0.0.1:'+str(server.server_port)
+    def serve():
+        if serving_delay: time.sleep(serving_delay)
+        server.serve_forever(poll_interval=.01)
+    thread = threading.Thread(target=serve, name='wecfu-synthetic-http')
+    timers_before = {thread for thread in threading.enumerate() if isinstance(thread, threading.Timer)}
+    rows = []; thread.start(); started = time.monotonic()
+    shared_deadline = started + (.6 if scenario == 'shared_http_timeout' else 4)
+    readiness_deadline = started + (.3 if scenario == 'startup_timeout' else 2)
+    try:
+        call = lambda: smoke.check_http({'origin':origin, 'session':TOKEN}, shared_deadline,
+                                       readiness_deadline=readiness_deadline, diagnostics=rows)
+        if scenario == 'delayed_listen_to_http':
+            assert call() is rows and all(row['state'] == 'completed' for row in rows)
+            assert rows[0]['seconds'] >= .15
+            assert received == ['unauthorized_batches','session_bootstrap','empty_batches','ultra_available']
+        else:
+            with pytest.raises(smoke.SmokeFailure, match='timed out'): call()
+            assert rows[-1]['state'] == 'timeout'
+            if scenario == 'startup_timeout':
+                assert rows[-1]['check'] == 'unauthorized_batches' and rows[-1]['timeout_constraint'] == 'startup_budget'
+            elif scenario == 'shared_http_timeout':
+                assert rows[-1]['check'] == 'empty_batches' and rows[-1]['timeout_constraint'] == 'shared_http_budget'
+            else:
+                assert rows[-1]['check'] == 'ultra_available' and rows[-1]['timeout_constraint'] == 'frontend_config_budget'
+                assert rows[-1]['phase'] == ('opening_response' if scenario == 'config_headers_timeout' else 'reading_body')
+            assert time.monotonic()-started < 1.5
+        assert TOKEN not in json.dumps(rows) and 'desktop_session' not in json.dumps(rows)
+        assert not ({thread for thread in threading.enumerate() if isinstance(thread, threading.Timer)} - timers_before)
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=2)
+        assert not thread.is_alive()
+        encoded = json.dumps({'scenario':scenario, 'http_checks':rows, 'ui_automation':False, 'model_requests':0})
+        assert TOKEN not in encoded and 'desktop_session' not in encoded
+        record_property('synthetic_http_diagnostics', encoded)
 
 
 def test_redirects_are_never_followed():
@@ -288,7 +430,7 @@ def test_redirects_are_never_followed():
         smoke.NoRedirect().redirect_request(None, None, None, None, None, 'https://example.com/')
 
 
-@pytest.mark.parametrize('failure', ['none', 'secret_exception', 'expired_deadline', 'cleanup', 'changed_exe'])
+@pytest.mark.parametrize('failure', ['none', 'secret_exception', 'expired_deadline', 'cleanup', 'changed_exe', 'http_timeout'])
 def test_run_owns_shell_and_always_retires_job_with_redacted_evidence(tmp_path, monkeypatch, failure):
     from wecfu import platform_runtime
     data, kwargs, args = fixture(tmp_path)
@@ -326,9 +468,15 @@ def test_run_owns_shell_and_always_retires_job_with_redacted_evidence(tmp_path, 
         if failure == 'cleanup': raise RuntimeError('private ' + TOKEN)
     monkeypatch.setattr(platform_runtime, 'stop_owned', stop)
     monkeypatch.setattr(smoke, 'read_metadata', metadata)
-    def http(capability, deadline):
+    def http(capability, deadline, *, diagnostics, readiness_deadline):
+        assert deadline <= time.monotonic()+smoke.HTTP_SECONDS
+        assert readiness_deadline <= time.monotonic()+smoke.START_SECONDS
+        diagnostics.append({'check':'unauthorized_batches', 'state':'completed', 'finished_after_seconds':.001})
+        if failure == 'http_timeout':
+            diagnostics.append({'check':'session_bootstrap', 'state':'timeout', 'phase':'opening_response'})
+            raise smoke.SmokeFailure('Installed HTTP check timed out: session_bootstrap during opening_response')
         if failure == 'changed_exe': kwargs['installed'].write_bytes(b'changed after launch')
-        return [{'check': 'synthetic-read-only'}]
+        return diagnostics
     monkeypatch.setattr(smoke, 'check_http', http)
     call = lambda: smoke.run(kwargs['installed'], kwargs['bundle'], kwargs['manifest'], output, expected, time.monotonic()+180)
     if failure == 'none':
@@ -343,6 +491,11 @@ def test_run_owns_shell_and_always_retires_job_with_redacted_evidence(tmp_path, 
     assert receipt['status'] == ('passed' if failure == 'none' else 'failed')
     assert receipt['model_requests'] == 0 and receipt['ui_automation'] is False and receipt['graceful_close_tested'] is False
     if failure != 'cleanup': assert receipt['forced_job_cleanup']['all_owned_processes_retired'] is True
+    if failure == 'http_timeout':
+        assert receipt['phase'] == 'authenticated_http_checks'
+        assert receipt['http_checks'][-1]['check'] == 'session_bootstrap'
+        assert receipt['http_checks'][-1]['state'] == 'timeout'
+        assert receipt['ready_seconds'] >= receipt['tcp_listener_observed_seconds']
 
 
 def test_nonwindows_and_wrong_exe_refuse_before_any_spawn(tmp_path, monkeypatch):

@@ -178,7 +178,11 @@ def workspace_directory(owned_root=None):
 
 
 def run_service(*, session_id, version, app_factory=None, workspace_root=None):
-    """Bind an OS-chosen socket before starting this instance's ASGI lifespan."""
+    """Verify this app's Ultra provider before accepting HTTP or reporting ready.
+
+    Injected synthetic app factories must supply an explicit capability provider
+    in the same app state contract; absence never bypasses production preflight.
+    """
     if not SESSION_PATTERN.fullmatch(session_id):
         raise ValueError('Invalid desktop session identifier')
     import uvicorn
@@ -189,10 +193,14 @@ def run_service(*, session_id, version, app_factory=None, workspace_root=None):
         (root / 'inputs').mkdir()
         (root / 'runs').mkdir()
         listener.bind(('127.0.0.1', 0))
-        listener.listen(128)
         port = listener.getsockname()[1]
-        app = DesktopSessionGuard(app_factory(get_root=lambda: root, web_mode=False),
-                                  port=port, session_id=session_id)
+        application = app_factory(get_root=lambda: root, web_mode=False)
+        # The first /api/config reads this very provider. Complete its full
+        # checkpoint/source/runtime verification here, within native startup,
+        # rather than triggering a slow probe behind the UI's short GET timeout.
+        application.state.model_preview_manager.sam.require_available()
+        app = DesktopSessionGuard(application, port=port, session_id=session_id)
+        listener.listen(128)
 
         class DesktopServer(uvicorn.Server):
             async def startup(self, sockets=None):
