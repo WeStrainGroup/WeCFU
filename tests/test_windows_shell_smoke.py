@@ -370,7 +370,10 @@ def test_real_loopback_http_readiness_deadlines_and_cookie_contract(monkeypatch,
             header_delay = body_delay = 0
             if scenario == 'config_headers_timeout' and label == 'ultra_available': header_delay = .9
             if scenario == 'config_body_timeout' and label == 'ultra_available': body_delay = .9
-            if scenario == 'shared_http_timeout' and label in ('session_bootstrap', 'empty_batches'): header_delay = .4
+            # Each delay fits the 2s shared budget alone; together they cannot.
+            # Leave 0.8s for Windows scheduling/HTTP overhead before the second
+            # delayed request, rather than the former 0.2s timing margin.
+            if scenario == 'shared_http_timeout' and label in ('session_bootstrap', 'empty_batches'): header_delay = 1.2
             if scenario == 'headers_plus_body_timeout' and label == 'ultra_available': header_delay, body_delay = .35, .45
             if header_delay: time.sleep(header_delay)
             payload = {'unauthorized_batches': b'denied', 'session_bootstrap': b'<html>synthetic</html>',
@@ -395,7 +398,7 @@ def test_real_loopback_http_readiness_deadlines_and_cookie_contract(monkeypatch,
     thread = threading.Thread(target=serve, name='wecfu-synthetic-http')
     timers_before = {thread for thread in threading.enumerate() if isinstance(thread, threading.Timer)}
     rows = []; thread.start(); started = time.monotonic()
-    shared_deadline = started + (.6 if scenario == 'shared_http_timeout' else 4)
+    shared_deadline = started + (2 if scenario == 'shared_http_timeout' else 4)
     readiness_deadline = started + (.3 if scenario == 'startup_timeout' else 2)
     try:
         call = lambda: smoke.check_http({'origin':origin, 'session':TOKEN}, shared_deadline,
@@ -410,11 +413,18 @@ def test_real_loopback_http_readiness_deadlines_and_cookie_contract(monkeypatch,
             if scenario == 'startup_timeout':
                 assert rows[-1]['check'] == 'unauthorized_batches' and rows[-1]['timeout_constraint'] == 'startup_budget'
             elif scenario == 'shared_http_timeout':
+                assert rows[1]['check'] == 'session_bootstrap' and rows[1]['state'] == 'completed'
                 assert rows[-1]['check'] == 'empty_batches' and rows[-1]['timeout_constraint'] == 'shared_http_budget'
+                assert rows[-1]['phase'] == 'opening_response'
+                assert received == ['unauthorized_batches', 'session_bootstrap', 'empty_batches']
+                # CPython 3.12 Windows monotonic samples have finite tick
+                # resolution; allow one measurement tick, not extra I/O time.
+                assert 0 < rows[-1]['timeout_seconds'] <= .8 + time.get_clock_info('monotonic').resolution
+                assert rows[-1]['timeout_seconds'] < rows[1]['timeout_seconds'] - 1
             else:
                 assert rows[-1]['check'] == 'ultra_available' and rows[-1]['timeout_constraint'] == 'frontend_config_budget'
                 assert rows[-1]['phase'] == ('opening_response' if scenario == 'config_headers_timeout' else 'reading_body')
-            assert time.monotonic()-started < 1.5
+            assert time.monotonic()-started < (3.5 if scenario == 'shared_http_timeout' else 1.5)
         assert TOKEN not in json.dumps(rows) and 'desktop_session' not in json.dumps(rows)
         assert not ({thread for thread in threading.enumerate() if isinstance(thread, threading.Timer)} - timers_before)
     finally:
