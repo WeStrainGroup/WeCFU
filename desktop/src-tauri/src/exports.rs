@@ -465,6 +465,42 @@ fn dialog_title(locale: &str) -> &'static str {
     }
 }
 
+#[cfg(target_os = "macos")]
+async fn macos_save_dialog(
+    window: &tauri::WebviewWindow,
+    shared: Arc<Shared>,
+    file_name: String,
+    locale: String,
+    ext: &'static str,
+) -> Result<Option<PathBuf>, String> {
+    let parent = window.clone();
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    // Construct the entire AppKit dialog on the event-loop thread. Creating an
+    // rfd future on a worker also accesses AppKit before rfd dispatches its panel
+    // setup, and that setup then runs inside a synchronous GCD dispatch.
+    // Only the future crosses back; the UI thread never waits for the user.
+    window
+        .run_on_main_thread(move || {
+            if let Err(error) = authorized(&parent, &shared) {
+                let _ = sender.try_send(Err(error));
+                return;
+            }
+            let dialog = rfd::AsyncFileDialog::new()
+                .set_parent(&parent)
+                .set_title(dialog_title(&locale))
+                .set_file_name(&file_name)
+                .add_filter(ext.to_ascii_uppercase(), &[ext])
+                .save_file();
+            let _ = sender.try_send(Ok(dialog));
+        })
+        .map_err(|_| "export_unavailable".to_string())?;
+    let dialog = receiver
+        .recv()
+        .await
+        .ok_or_else(|| "export_unavailable".to_string())??;
+    Ok(dialog.await.map(|file| file.path().to_owned()))
+}
+
 #[tauri::command]
 pub async fn desktop_export_prepare(
     window: tauri::WebviewWindow,
@@ -475,22 +511,29 @@ pub async fn desktop_export_prepare(
     authorized(&window, &state)?;
     let ext = extension(&file_name)?;
     state.exports.lock().unwrap().begin()?;
+    #[cfg(target_os = "macos")]
+    let selected =
+        match macos_save_dialog(&window, state.inner().clone(), file_name, locale, ext).await {
+            Ok(selected) => selected,
+            Err(error) => {
+                state.exports.lock().unwrap().choosing = false;
+                return Err(error);
+            }
+        };
+    #[cfg(not(target_os = "macos"))]
     let selected = rfd::AsyncFileDialog::new()
         .set_parent(&window)
         .set_title(dialog_title(&locale))
         .set_file_name(&file_name)
         .add_filter(ext.to_ascii_uppercase(), &[ext])
         .save_file()
-        .await;
+        .await
+        .map(|file| file.path().to_owned());
     if let Err(error) = authorized(&window, &state) {
         state.exports.lock().unwrap().choosing = false;
         return Err(error);
     }
-    state
-        .exports
-        .lock()
-        .unwrap()
-        .selected(selected.map(|file| file.path().to_owned()), ext)
+    state.exports.lock().unwrap().selected(selected, ext)
 }
 
 #[tauri::command]
