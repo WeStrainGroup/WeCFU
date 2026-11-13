@@ -1697,14 +1697,17 @@ async function countCustomBatch() {
   const params = appliedCustomParams(), batch = state.batch, engine = workflowBuiltinEngine();
   const items = state.imageList.map(item => ({...item}));
   const report = {completed: [], protected: [], failed: [], canceled: false};
+  const batchReport = {results: [], stopped: false, total: items.length};
   clearModelPreview(); clearPreview(); state.busy = true; state.cancelRun = false;
+  state.batchRun = {active: true, report: batchReport};
   updateControls(); $('btn-stop-run').hidden = false;
+  $('batch-report').open = false; renderBatchReport(batchReport);
   try {
     await flushEdits();
     for (let index = 0; index < items.length; index++) {
       if (state.cancelRun) { report.canceled = true; break; }
       const name = items[index].name;
-      let submitted = false;
+      let submitted = false, outcome;
       setStatus(`${t('statusProcessing')} ${index + 1}/${items.length} · ${name}`);
       try {
         const existing = await jsonRequest(imageURL('/detections', batch, name)).catch(error => {
@@ -1716,7 +1719,11 @@ async function countCustomBatch() {
           const reference = state.config?.web_mode ? {status: 'missing'} : await jsonRequest(imageURL('/reference', batch, name));
           protection = workflowHelpers.batchProtection(existing, reference);
         }
-        if (protection) { report.protected.push({name, reason: protection}); continue; }
+        if (protection) {
+          report.protected.push({name, reason: protection});
+          outcome = {name, status: 'skipped', reason: protection === 'manual' ? 'manual_mode' : protection === 'reference' ? 'reference' : 'human_work'};
+          continue;
+        }
         if (state.cancelRun) { report.canceled = true; break; }
         const revision = existing?.revision ?? 0;
         if (!Number.isInteger(revision)) throw new Error(t('modelMissingRevision'));
@@ -1725,6 +1732,7 @@ async function countCustomBatch() {
         submitted = true;
         const data = await jsonRequest(`${imageURL('/run', batch, name)}?engine=${enc(engine)}&expected_revision=${revision}&protect_existing_edits=true&expected_image_sha256=${hash}`, 'POST', params);
         report.completed.push(name);
+        outcome = {name, status: 'completed'};
         if (batch === state.batch && name === state.imageName && state.imageSourceHash === hash) {
           // Undo restores exactly the server state replaced by this run, including a newer
           // machine-only result from another tab, not this tab's older displayed snapshot.
@@ -1736,19 +1744,27 @@ async function countCustomBatch() {
         // A concurrent edit or newly created reference is protected under the server lock. Never retry it.
         const uncertain = submitted && (!Number.isInteger(error.status) || error.status >= 500);
         (error.status === 409 ? report.protected : report.failed).push({name, reason: error.message, ...(uncertain ? {uncertain: true} : {})});
+        outcome = {name, status: error.status === 409 ? 'skipped' : uncertain ? 'uncertain' : 'failed', reason: error.message};
         if (uncertain) {
           // A lost response may follow a successful write. Stop rather than overwrite from stale state.
           if (batch === state.batch && name === state.imageName) emptyViewer();
           report.canceled = true; break;
         }
+      } finally {
+        if (outcome) batchReport.results.push(outcome);
+        renderBatchReport(batchReport);
       }
     }
     await loadImages();
-    setStatus(`${t(report.canceled ? 'countStopped' : 'statusDone')} · ${report.completed.length} ${t('countCompleted')} · ${report.protected.length} ${t('countSkipped')} · ${report.failed.length} ${t('customBatchFailed')}`, report.failed.length > 0);
     $('status').title = [...report.protected, ...report.failed].map(item => `${item.name}: ${item.reason}`).join('\n');
+  } catch (error) {
+    batchReport.stopped = true;
+    throw error;
   } finally {
+    batchReport.stopped ||= report.canceled;
     state.workflow.lastBatchReport = report;
-    state.busy = false; $('btn-stop-run').hidden = true; updateControls(); refreshMaskPreview();
+    state.busy = false; state.batchRun.active = false; $('btn-stop-run').hidden = true;
+    updateControls(); renderBatchReport(batchReport); refreshMaskPreview();
   }
 }
 

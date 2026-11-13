@@ -100,6 +100,38 @@ fn selected_folder(path: Option<PathBuf>) -> Result<Option<String>, String> {
     Ok(Some(text.to_owned()))
 }
 
+#[cfg(target_os = "macos")]
+async fn macos_folder_dialog(
+    window: &tauri::WebviewWindow,
+    shared: Arc<Shared>,
+    locale: Locale,
+) -> Result<Option<rfd::FileHandle>, String> {
+    let parent = window.clone();
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    // As with the save dialog, construct AppKit state on the event-loop thread.
+    // Creating the rfd future opens the panel; only awaiting its result happens
+    // on the worker. The UI thread never waits for the user or the receiver.
+    window
+        .run_on_main_thread(move || {
+            if let Err(error) = authorized(&parent, &shared) {
+                let _ = sender.try_send(Err(error));
+                return;
+            }
+            let dialog = rfd::AsyncFileDialog::new()
+                .set_parent(&parent)
+                .set_title(locale.title())
+                .set_can_create_directories(false)
+                .pick_folder();
+            let _ = sender.try_send(Ok(dialog));
+        })
+        .map_err(|_| "import_unavailable".to_string())?;
+    let dialog = receiver
+        .recv()
+        .await
+        .ok_or_else(|| "import_unavailable".to_string())??;
+    Ok(dialog.await)
+}
+
 #[tauri::command]
 pub async fn desktop_choose_import_folder(
     window: tauri::WebviewWindow,
@@ -108,6 +140,9 @@ pub async fn desktop_choose_import_folder(
 ) -> Result<Option<String>, String> {
     let origin = authorized(&window, &state)?;
     let _choosing = state.import_chooser.begin()?;
+    #[cfg(target_os = "macos")]
+    let selected = macos_folder_dialog(&window, state.inner().clone(), locale).await?;
+    #[cfg(not(target_os = "macos"))]
     let selected = rfd::AsyncFileDialog::new()
         .set_parent(&window)
         .set_title(locale.title())

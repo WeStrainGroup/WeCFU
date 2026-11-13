@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.5
+
+- Refresh the batch summary after Custom recognition, including skipped and
+  failed photos.
+- Initialize the native macOS folder picker on the main thread, including its
+  first use after launch.
+- Keep recognition methods, model weights and batch protection rules unchanged.
+
 ## 1.2.4
 
 - Apply the shared import and interface fixes to the Conda and hosted apps as

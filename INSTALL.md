@@ -1,4 +1,4 @@
-# Install and run WeCFU 1.2.4
+# Install and run WeCFU 1.2.5
 
 ## Local installation
 
@@ -9,7 +9,7 @@ separate installation checks; a desktop test does not establish Conda acceptance
 on the same operating system.
 
 ```sh
-conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.4 -y
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.5 -y
 conda activate wecfu
 wecfu serve
 ```
@@ -57,7 +57,7 @@ a new package does not update an already running process.
 
 ```sh
 conda activate wecfu
-conda install -c westraingroup -c conda-forge python=3.12 wecfu=1.2.4 -y
+conda install -c westraingroup -c conda-forge python=3.12 wecfu=1.2.5 -y
 wecfu serve
 ```
 
@@ -102,7 +102,7 @@ Do not store photographs or results in the model cache.
 ```sh
 git clone https://github.com/WeStrainGroup/WeCFU.git
 cd WeCFU
-git checkout v1.2.4
+git checkout v1.2.5
 conda create -n wecfu-source -c conda-forge python=3.12 pip -y
 conda activate wecfu-source
 python -m pip install '.[dev]'

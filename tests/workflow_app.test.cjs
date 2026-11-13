@@ -795,6 +795,10 @@ test('custom batch recounts machine-only results with one captured recipe, skips
   assert.deepEqual(report.completed, ['first.png', 'second.png']);
   assert.deepEqual(report.protected.map(p => p.name), ['manual.png', 'notes.png', 'reference.png', 'race.png']);
   assert.deepEqual(report.failed, []);
+  assert.deepEqual(plain(v.run('state.batchRun.report.results.map(row=>[row.name,row.status])')), [
+    ['first.png','completed'],['second.png','completed'],['manual.png','skipped'],
+    ['notes.png','skipped'],['reference.png','skipped'],['race.png','skipped']]);
+  assert.match(v.element('batch-report-summary').textContent, /2 countCompleted.*4 countSkipped.*0 customBatchFailed/);
 });
 
 test('single edited recount asks permission and uses the latest queue revision after flush', async () => {
@@ -2114,4 +2118,111 @@ test('switching language retains the photo identity and translates the existing 
   assert.deepEqual(plain(v.run('snapshot()')), before);
   assert.equal(v.run('calls.length'), 0);
   assert.equal(v.run('saves.length'), 0);
+});
+
+function customSidebarFixture(locale) {
+  const v = ui(locale);
+  v.run(`state.batchRun={active:false,report:{total:2,stopped:false,results:[
+    {name:'old-first.png',status:'completed'},{name:'old-second.png',status:'completed'}]}};
+    renderBatchReport(state.batchRun.report);`);
+  custom(v);
+  v.run(`let customDocs={'first.png':{...fixtureDoc,revision:10},'second.png':{...fixtureDoc,revision:11}};
+    let customFailure=null, pauseCustomPost=false, finishCustomPost;
+    state.imageList=Object.keys(customDocs).map(name=>({name,counted:true}));
+    jsonRequest=async(url,method='GET',body)=>{
+      calls.push({url,method,body:body===undefined?null:clone(body)});
+      const name=decodeURIComponent(url.split('/image/')[1].split('/')[0]);
+      if(url.endsWith('/detections'))return clone(customDocs[name]);
+      if(url.endsWith('/reference'))return {status:'missing'};
+      if(method==='POST'&&url.includes('/run?')){
+        if(name==='first.png'&&customFailure){const error=Error('synthetic request failure');
+          if(customFailure.status!==null)error.status=customFailure.status;throw error;}
+        const result={...clone(customDocs[name]),params:clone(body),count_params:clone(body),count_engine:ENHANCED_ENGINE,revision:customDocs[name].revision+1};
+        if(pauseCustomPost)return new Promise(resolve=>{finishCustomPost=()=>resolve(result);});
+        return result;
+      }
+      throw Error('unexpected synthetic request');
+    };`);
+  return v;
+}
+
+test('custom sidebar replaces an earlier default report, preserves skipped rows, and translates the newest run', async () => {
+  const v = customSidebarFixture('en');
+  v.run("customDocs['first.png'].notes='synthetic retained note'; populateLangSelect();");
+  await v.run('countAll()');
+  assert.equal(v.element('batch-report-summary').textContent, 'Done · 1 counted · 1 preserved · 0 Failed');
+  assert.equal(v.element('status').textContent, v.element('batch-report-summary').textContent);
+  assert.deepEqual(plain(v.run('state.batchRun.report')), {total:2, stopped:false, results:[
+    {name:'first.png',status:'skipped',reason:'human_work'}, {name:'second.png',status:'completed'}]});
+  assert.deepEqual(plain(v.run('state.workflow.lastBatchReport')), {
+    completed:['second.png'],protected:[{name:'first.png',reason:'edited'}],failed:[],canceled:false});
+  const calls = plain(v.run('calls'));
+  assert.deepEqual(calls.map(c=>[c.method,c.url.split('/image/')[1].split('?')[0]]), [
+    ['GET','first.png/detections'],['GET','second.png/detections'],['GET','second.png/reference'],['POST','second.png/run']]);
+  const params = new URL(calls[3].url, 'http://synthetic').searchParams;
+  assert.equal(params.get('protect_existing_edits'), 'true');
+  assert.equal(params.get('expected_revision'), '11');
+  assert.equal(params.get('expected_image_sha256'), 'a'.repeat(64));
+  assert.deepEqual(calls[3].body, defaults);
+  assert.deepEqual(v.element('batch-report-items').children.map(row=>row.textContent.split(' · ')[0]), ['first.png','second.png']);
+  assert.doesNotMatch(v.element('batch-report-items').children[0].textContent, /edited|human_work/);
+  const status = v.element('status').textContent;
+  v.element('lang-select').value = 'zh-CN'; await v.element('lang-select').fire('change');
+  assert.match(v.element('batch-report-summary').textContent, /^完成.*1.*1/);
+  assert.doesNotMatch(v.element('batch-report-summary').textContent, /counted|preserved/);
+  assert.equal(v.element('status').textContent, status);
+  assert.equal(v.run('calls.length'), calls.length);
+  assert.equal(v.run('state.batchRun.active'), false);
+  assert.equal(v.run('saves.length'), 0);
+});
+
+test('custom sidebar resets immediately and stopping after the active photo preserves remaining work', async () => {
+  const v = customSidebarFixture();
+  v.run("customDocs['third.png']={...fixtureDoc,revision:12}; state.imageList=Object.keys(customDocs).map(name=>({name,counted:true})); pauseCustomPost=true;");
+  const pending = v.run('countAll()');
+  assert.equal(v.run('state.batchRun.active'), true);
+  assert.deepEqual(plain(v.run('state.batchRun.report')), {total:3,stopped:false,results:[]});
+  assert.match(v.element('batch-report-summary').textContent, /statusProcessing.*0 countCompleted.*3 batchRemaining/);
+  for (let turn=0; turn<30 && !v.run('typeof finishCustomPost === "function"'); turn++) await Promise.resolve();
+  assert.equal(v.run('typeof finishCustomPost'), 'function');
+  await v.element('btn-stop-run').fire('click');
+  v.run('finishCustomPost()'); await pending;
+  assert.deepEqual(plain(v.run('state.batchRun.report')), {total:3,stopped:true,results:[{name:'first.png',status:'completed'}]});
+  assert.match(v.element('batch-report-summary').textContent, /countStopped.*1 countCompleted.*2 batchRemaining/);
+  assert.equal(v.run("calls.filter(c=>c.method==='POST').length"), 1);
+  assert.equal(v.run("calls.some(c=>c.url.includes('second.png')||c.url.includes('third.png'))"), false);
+  assert.equal(v.run('state.busy || state.batchRun.active'), false);
+  assert.equal(v.element('btn-stop-run').hidden, true);
+});
+
+for (const [httpStatus, expectedStatus, stopped] of [[409,'skipped',false],[400,'failed',false],[500,'uncertain',true],[null,'uncertain',true]]) {
+  test(`custom sidebar reports ${expectedStatus} after HTTP ${httpStatus} without changing continuation or retry rules`, async () => {
+    const v = customSidebarFixture();
+    v.run(`customFailure={status:${httpStatus}};`);
+    await v.run('countAll()');
+    const report = plain(v.run('state.batchRun.report'));
+    assert.equal(report.total, 2); assert.equal(report.stopped, stopped);
+    assert.deepEqual(report.results, [{name:'first.png',status:expectedStatus,reason:'synthetic request failure'},
+      ...(stopped ? [] : [{name:'second.png',status:'completed'}])]);
+    const posts = plain(v.run("calls.filter(c=>c.method==='POST')"));
+    assert.equal(posts.length, stopped ? 1 : 2);
+    assert.equal(posts.filter(c=>c.url.includes('first.png')).length, 1);
+    assert.match(v.element('batch-report-summary').textContent, stopped
+      ? /countStopped.*0 countCompleted.*1 customBatchFailed.*1 batchRemaining/
+      : httpStatus===409 ? /statusDone.*1 countCompleted.*1 countSkipped.*0 customBatchFailed/
+      : /statusDone.*1 countCompleted.*0 countSkipped.*1 customBatchFailed/);
+    assert.equal(v.element('status').textContent, v.element('batch-report-summary').textContent);
+    assert.equal(v.run('state.busy || state.batchRun.active'), false);
+  });
+}
+
+test('custom sidebar finally retires an interrupted run when flushing saved edits fails', async () => {
+  const v = customSidebarFixture();
+  v.run("flushEdits=async()=>{throw Error('synthetic save failure');};");
+  await assert.rejects(v.run('countAll()'), /synthetic save failure/);
+  assert.deepEqual(plain(v.run('state.batchRun.report')), {total:2,stopped:true,results:[]});
+  assert.match(v.element('batch-report-summary').textContent, /countStopped.*0 countCompleted.*2 batchRemaining/);
+  assert.equal(v.run('state.busy || state.batchRun.active'), false);
+  assert.equal(v.element('btn-stop-run').hidden, true);
+  assert.equal(v.run('calls.length'), 0);
 });

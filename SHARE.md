@@ -1,4 +1,4 @@
-# Publish a reviewed WeCFU 1.2.4 release
+# Publish a reviewed WeCFU 1.2.5 release
 
 The existing public targets are:
 
@@ -15,7 +15,7 @@ Hugging Face application checkout.
 
 ## Keep the release contract consistent
 
-For 1.2.4, the local default is **Ultra: fixed algorithm + SAM**. Lite preserves
+For 1.2.5, the local default is **Ultra: fixed algorithm + SAM**. Lite preserves
 the improved classical method; Custom applies user-selected classical settings.
 New requests do not use the legacy Fusion route. Existing Fusion results and
 provenance remain readable; do not relabel them as current Ultra results.
@@ -41,7 +41,7 @@ must report Ultra unavailable rather than silently substitute Lite.
    fall back to English. Check fresh default sessions, cleanup on server stop,
    and preservation of explicitly chosen `--root` workspaces.
 4. Verify warm-worker lifecycle and explicit cold rollback. Warm workers are
-   enabled by default in 1.2.4; `WECFU_SAM_WARM_WORKER=0` retains the cold route.
+   enabled by default in 1.2.5; `WECFU_SAM_WARM_WORKER=0` retains the cold route.
    Do not change weights, numerical settings or thresholds as part of packaging.
 5. Commit the final reviewed product files before building. The Conda recipe
    snapshots Git HEAD; uncommitted changes are not included.
@@ -64,13 +64,13 @@ From the reviewed release commit:
 ```sh
 python -m build
 conda build . -c conda-forge --no-anaconda-upload
-python tests/test_release_packaging.py dist/wecfu-1.2.4-py3-none-any.whl dist/wecfu-1.2.4.tar.gz
+python tests/test_release_packaging.py dist/wecfu-1.2.5-py3-none-any.whl dist/wecfu-1.2.5.tar.gz
 ```
 
 Pass the actual `.conda` path printed by conda-build to the same auditor:
 
 ```sh
-python tests/test_release_packaging.py /path/to/wecfu-1.2.4-py_0.conda
+python tests/test_release_packaging.py /path/to/wecfu-1.2.5-py_0.conda
 ```
 
 The auditor reads archive members without installation or extraction. It checks
@@ -106,13 +106,13 @@ separately; never treat a noarch package as evidence of cross-platform testing.
 After artifact inspection and clean-install validation:
 
 ```sh
-git tag v1.2.4
-git push github HEAD:main v1.2.4
-gh release create v1.2.4 --repo WeStrainGroup/WeCFU --verify-tag \
-  dist/wecfu-1.2.4-py3-none-any.whl dist/wecfu-1.2.4.tar.gz \
-  --title 'WeCFU 1.2.4' --notes-file CHANGELOG.md
+git tag v1.2.5
+git push github HEAD:main v1.2.5
+gh release create v1.2.5 --repo WeStrainGroup/WeCFU --verify-tag \
+  dist/wecfu-1.2.5-py3-none-any.whl dist/wecfu-1.2.5.tar.gz \
+  --title 'WeCFU 1.2.5' --notes-file CHANGELOG.md
 anaconda org whoami
-anaconda org upload --user WeStrainGroup --label main /path/to/wecfu-1.2.4-py_0.conda
+anaconda org upload --user WeStrainGroup --label main /path/to/wecfu-1.2.5-py_0.conda
 ```
 
 Use the actual reviewed ref if it differs from `main`. Reuse existing

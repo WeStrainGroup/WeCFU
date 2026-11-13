@@ -1,4 +1,4 @@
-# WeCFU 1.2.4
+# WeCFU 1.2.5
 
 A browser workspace for counting colonies on petri-dish photographs, correcting
 individual markers, and exporting counts with annotated images.
@@ -23,7 +23,7 @@ Changing modes does not change an already saved result.
 The Conda application requires Python 3.12. On macOS, Linux or Windows x64:
 
 ```sh
-conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.4 -y
+conda create -n wecfu -c westraingroup -c conda-forge python=3.12 wecfu=1.2.5 -y
 conda activate wecfu
 wecfu serve
 ```

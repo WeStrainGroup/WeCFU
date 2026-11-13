@@ -293,7 +293,7 @@ def main():
     parser.add_argument('--archive', type=Path)
     parser.add_argument('--model-cache', type=Path)
     parser.add_argument('--refresh-app', action='store_true')
-    parser.add_argument('--version', default='1.2.4')
+    parser.add_argument('--version', default='1.2.5')
     args = parser.parse_args()
     name = target()
     output = prepare_output(args.output, name, refresh=args.refresh_app)

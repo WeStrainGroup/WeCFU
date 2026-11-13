@@ -1,7 +1,7 @@
 # WeCFU Desktop
 
 Desktop candidate **1.3.0-rc.1**. This directory is not a declaration of public
-release readiness. The existing Conda/web application version remains 1.2.4.
+release readiness. The existing Conda/web application version remains 1.2.5.
 
 ## User experience
 
